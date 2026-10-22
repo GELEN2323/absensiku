@@ -30,7 +30,7 @@ async function loadUserContext(userId) {
   if (profile?.employee_id) {
     const { data, error } = await db
       .from('employees')
-      .select('id, nip, nama, departemen, email, photo_url, face_encoding')
+      .select('id, nip, nama, departemen, email, photo_url, face_registered')
       .eq('id', profile.employee_id)
       .maybeSingle();
     if (error) throw error;
@@ -57,7 +57,7 @@ function serializeUser(context) {
           departemen: employee.departemen,
           email: employee.email,
           photo_url: employee.photo_url,
-          face_registered: Boolean(employee.face_encoding),
+          face_registered: Boolean(employee.face_registered),
         }
       : null,
   };

@@ -10,13 +10,14 @@ const { db } = require('./supabase');
 const authRoutes = require('./routes/auth');
 const attendanceRoutes = require('./routes/attendance');
 const adminRoutes = require('./routes/admin');
+const faceRoutes = require('./routes/face');
+const { loadFaceApi } = require('./lib/face');
 
 const app = express();
 
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
 app.use(cors({ origin: true }));
-app.use(express.json({ limit: '1mb' }));
 
 app.use((req, res, next) => {
   if (!req.path.startsWith('/api')) return next();
@@ -46,6 +47,12 @@ app.get('/api/health', async (_req, res) => {
 app.get('/api/office', (_req, res) => {
   res.json({ office: config.office });
 });
+
+// Parser khusus face HARUS didaftarkan sebelum express.json global (1mb),
+// kalau tidak body 3 foto akan ditolak 413 sebelum route-nya jalan.
+app.use('/api/face', express.json({ limit: config.faceBodyLimit }), faceRoutes);
+
+app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
@@ -108,6 +115,11 @@ const server = app.listen(config.port, '0.0.0.0', () => {
   console.log(`[api] listening on http://localhost:${config.port}`);
   console.log(`[api] web build: ${hasWebBuild ? config.webDist : 'belum ada (dev mode)'}`);
   console.log(`[api] office: ${config.office.name} (${config.office.lat}, ${config.office.lng}) r=${config.office.radiusM}m`);
+
+  // Muat model di background supaya request pertama tidak menunggu ~1-2 detik.
+  loadFaceApi().catch((error) => {
+    console.error('[face] gagal memuat model:', error.message);
+  });
 });
 
 function shutdown(signal) {

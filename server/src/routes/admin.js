@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const { db } = require('../supabase');
 const { requireAuth, requireAdmin } = require('../auth');
@@ -10,7 +11,7 @@ const { attendancePhotoMap, attachPhotos } = require('../photos');
 const router = express.Router();
 router.use(requireAuth, requireAdmin);
 
-const EMPLOYEE_FIELDS = 'id, nip, nama, departemen, email, photo_url, face_encoding';
+const EMPLOYEE_FIELDS = 'id, nip, nama, departemen, email, photo_url, face_registered';
 
 async function fetchEmployees() {
   const { data, error } = await db
@@ -23,8 +24,7 @@ async function fetchEmployees() {
 }
 
 function publicEmployee(employee) {
-  const { face_encoding: faceEncoding, ...rest } = employee;
-  return { ...rest, face_registered: Boolean(faceEncoding) };
+  return { ...employee, face_registered: Boolean(employee.face_registered) };
 }
 
 router.get('/summary', async (req, res) => {
@@ -156,6 +156,65 @@ router.get('/employees/:id', async (req, res) => {
     attendance: (records || []).map((row) => attachPhotos(decorateRecord(row), photoMap)),
     summary: summarize(records || []),
   });
+});
+
+/**
+ * Reset password karyawan. Admin menerima password sementara SEKALI,
+ * lalu menyampaikannya ke karyawan. Tidak ada email/SMTP yang dibutuhkan.
+ */
+router.post('/employees/:id/reset-password', async (req, res) => {
+  const { data: profile, error } = await db
+    .from('profiles')
+    .select('id')
+    .eq('employee_id', req.params.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!profile) {
+    res.status(404).json({ error: { message: 'Akun login karyawan tidak ditemukan.' } });
+    return;
+  }
+
+  const temporaryPassword = crypto.randomBytes(9).toString('base64url');
+  const { error: updateError } = await db.auth.admin.updateUserById(profile.id, {
+    password: temporaryPassword,
+  });
+  if (updateError) throw updateError;
+
+  res.json({
+    ok: true,
+    temporary_password: temporaryPassword,
+    message: 'Sampaikan password sementara ini ke karyawan. Password hanya tampil sekali.',
+  });
+});
+
+/**
+ * Reset wajah: hapus embedding + flag, dan buka blokir liveness hari ini.
+ * Dipakai kalau registrasi gagal berulang atau wajah perlu didaftarkan ulang.
+ */
+router.post('/employees/:id/reset-face', async (req, res) => {
+  const id = req.params.id;
+
+  const { error: faceError } = await db.from('employee_faces').delete().eq('employee_id', id);
+  if (faceError) throw faceError;
+
+  const { error: employeeError } = await db
+    .from('employees')
+    .update({ face_registered: false })
+    .eq('id', id);
+  if (employeeError) throw employeeError;
+
+  // Buka blokir liveness hari ini (log lain tetap disimpan untuk audit).
+  const { error: logError } = await db
+    .from('face_attempt_logs')
+    .delete()
+    .eq('employee_id', id)
+    .eq('attempt_type', 'verify')
+    .eq('success', false)
+    .like('reason', 'LIVENESS_%')
+    .gte('created_at', `${dateKey()}T00:00:00+07:00`);
+  if (logError) throw logError;
+
+  res.json({ ok: true, face_registered: false });
 });
 
 module.exports = router;

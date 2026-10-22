@@ -7,11 +7,18 @@ const { requireAuth } = require('../auth');
 const { evaluateLocation } = require('../geo');
 const { dateKey, hariName, timeKey, minutesBetween, formatDuration, monthRange } = require('../time');
 const { decorateRecord, summarize } = require('../attendance-utils');
-const { uploadAttendancePhoto, attendancePhotoMap, attachPhotos } = require('../photos');
+const {
+  assertPhoto,
+  uploadAttendancePhotoSafe,
+  attendancePhotoMap,
+  attachPhotos,
+} = require('../photos');
 const { HttpError, conflict } = require('../errors');
 
 const router = express.Router();
 router.use(requireAuth);
+
+const OPEN_SHIFT_HOURS = 18;
 
 function employeeId(req) {
   const id = req.user.employee?.id;
@@ -35,31 +42,51 @@ async function findToday(employeeIdValue, date = dateKey()) {
   return data;
 }
 
+/**
+ * Cari shift yang belum ditutup (untuk absen pulang lewat tengah malam).
+ * Tanpa ini, absen masuk 23:00 dan pulang 07:00 selalu gagal.
+ */
+async function findOpenShift(employeeIdValue) {
+  const since = new Date(Date.now() - OPEN_SHIFT_HOURS * 3600 * 1000).toISOString();
+  const { data, error } = await db
+    .from('attendance')
+    .select('*')
+    .eq('employee_id', employeeIdValue)
+    .is('check_out_at', null)
+    .gte('check_in_at', since)
+    .order('check_in_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) throw error;
+  return data;
+}
+
 function assertLocationAllowed(location) {
-  if (config.requireLocation && !location.hasLocation) {
-    throw new HttpError(422, 'Lokasi GPS tidak tersedia. Aktifkan izin lokasi lalu coba lagi.');
+  // Lokasi wajib. Klien tetap tidak dipercaya soal koordinat, tapi minimal
+  // tidak ada lagi jalan pintas "absen tanpa lokasi" seperti di audit.
+  if (!location.hasLocation) {
+    throw new HttpError(422, 'Lokasi GPS wajib aktif untuk absensi.', {
+      code: 'LOCATION_REQUIRED',
+    });
   }
 
-  if (!config.enforceGeofence || !location.hasLocation) return;
-
-  // GPS dengan akurasi buruk (>100 m) bisa menolak karyawan yang sebenarnya
-  // sudah di kantor, jadi minta pengguna menunggu sinyal membaik.
-  if (location.accuracy !== null && location.accuracy > config.maxAccuracyM) {
+  if (location.accuracy === null || location.accuracy > config.maxAccuracyM) {
     throw new HttpError(
       422,
-      `Akurasi GPS terlalu rendah (±${location.accuracy} m). Tunggu beberapa saat di area terbuka, lalu coba lagi.`,
-      {
-        accuracy: location.accuracy,
-        maxAccuracyM: config.maxAccuracyM,
-      }
+      `Akurasi GPS tidak valid${location.accuracy === null ? '' : ` (±${location.accuracy} m)`}. Tunggu sinyal membaik lalu coba lagi.`,
+      { code: 'LOCATION_ACCURACY', accuracy: location.accuracy, maxAccuracyM: config.maxAccuracyM }
     );
   }
+
+  if (!config.enforceGeofence) return;
 
   if (!location.inside) {
     throw new HttpError(
       422,
       `Anda berada ${location.distanceM} m dari ${config.office.name}. Radius absensi ${config.office.radiusM} m.`,
       {
+        code: 'OUTSIDE_GEOFENCE',
         distanceM: location.distanceM,
         radiusM: config.office.radiusM,
         toleranceM: location.toleranceM,
@@ -70,25 +97,63 @@ function assertLocationAllowed(location) {
 }
 
 /**
- * Foto opsional: kalau dikirim, unggah ke storage dan kembalikan URL publiknya.
- * `REQUIRE_PHOTO=true` membuat absensi tanpa foto ditolak.
+ * Validasi payload foto SEBELUM menulis attendance, supaya foto rusak
+ * ditolak lebih awal tapi upload yang gagal tidak membatalkan absensi.
  */
-async function savePhoto(req, { employeeId: employeeIdValue, date, type }) {
+function requirePhotoPayload(req) {
   const photo = req.body?.photo;
 
   if (!photo) {
     if (config.requirePhoto) {
-      throw new HttpError(422, 'Foto wajib diambil sebelum absensi.');
+      throw new HttpError(422, 'Foto wajib diambil sebelum absensi.', {
+        code: 'PHOTO_REQUIRED',
+      });
     }
     return null;
   }
 
-  return uploadAttendancePhoto({
-    employeeId: employeeIdValue,
-    date,
-    type,
-    photo,
-  });
+  assertPhoto(photo);
+  return photo;
+}
+
+/**
+ * Ambil bukti verifikasi wajah sekali pakai.
+ * Distance dibaca dari database, BUKAN dari body request.
+ */
+async function consumeVerification(req, employeeIdValue) {
+  const verificationId = String(req.body?.verification_id || '').trim();
+  if (!verificationId) {
+    throw new HttpError(400, 'Verifikasi wajah wajib dilakukan sebelum absen.', {
+      code: 'FACE_VERIFICATION_REQUIRED',
+    });
+  }
+
+  const now = new Date().toISOString();
+  const { data, error } = await db
+    .from('face_verifications')
+    .update({ used_at: now })
+    .eq('id', verificationId)
+    .eq('employee_id', employeeIdValue)
+    .is('used_at', null)
+    .gt('expires_at', now)
+    .select('distance, liveness_passed')
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) {
+    throw new HttpError(
+      400,
+      'Verifikasi wajah tidak valid atau sudah kedaluwarsa. Ulangi verifikasi.',
+      { code: 'FACE_VERIFICATION_INVALID' }
+    );
+  }
+  if (!data.liveness_passed || Number(data.distance) >= config.faceVerifyThreshold) {
+    throw new HttpError(400, 'Verifikasi wajah tidak lolos. Ulangi verifikasi.', {
+      code: 'FACE_VERIFICATION_INVALID',
+    });
+  }
+
+  return { id: verificationId, distance: Number(data.distance) };
 }
 
 function locationFields(location, prefix) {
@@ -145,14 +210,9 @@ router.get('/', async (req, res) => {
 
 router.post('/check-in', async (req, res) => {
   const id = employeeId(req);
-  const { isMocked } = req.body || {};
-  // Anti-fake location: tolak jika GPS diekspolasi/mock
-  if (isMocked) {
-    throw new HttpError(
-      403,
-      'Akses ditolak: Lokasi terdeteksi sebagai pengaksesan mock GPS atau VPN.'
-    );
-  }
+
+  // Catatan: deteksi mock location tidak bisa dipercaya dari body (boolean
+  // client). Kalau butuh kontrol nyata, pakai Play Integrity / App Attest.
   const location = await evaluateLocation(req.body || {});
   assertLocationAllowed(location);
 
@@ -162,7 +222,9 @@ router.post('/check-in', async (req, res) => {
     throw conflict('Anda sudah absen masuk hari ini.');
   }
 
-  const photoUrl = await savePhoto(req, { employeeId: id, date, type: 'in' });
+  // Validasi foto dulu (tanpa menulis apa pun), lalu verifikasi wajah.
+  const photo = requirePhotoPayload(req);
+  const verification = await consumeVerification(req, id);
 
   const payload = {
     employee_id: id,
@@ -170,20 +232,49 @@ router.post('/check-in', async (req, res) => {
     hari: hariName(),
     check_in_at: new Date().toISOString(),
     ...locationFields(location, 'check_in'),
-    lokasi_tidak_tersedia: !location.hasLocation || !location.available,
+    lokasi_tidak_tersedia: false,
+    face_match: verification.distance,
+    face_verified: true,
+    liveness_passed: true,
+    face_verification_id: verification.id,
+    needs_photo: !photo,
   };
 
   const { data, error } = await db.from('attendance').insert(payload).select('*').single();
-  if (error) throw error;
+  if (error) {
+    if (error.code === '23505') throw conflict('Anda sudah absen masuk hari ini.');
+    throw error;
+  }
+
+  let photoUrl = null;
+  let photoError = null;
+  if (photo) {
+    const uploaded = await uploadAttendancePhotoSafe({
+      employeeId: id,
+      date,
+      type: 'in',
+      photo,
+    });
+    photoUrl = uploaded.url;
+    photoError = uploaded.error;
+
+    if (!photoUrl) {
+      await db.from('attendance').update({ needs_photo: true }).eq('id', data.id);
+      data.needs_photo = true;
+    }
+  }
 
   res.status(201).json({
-    message: photoUrl ? 'Absen masuk berhasil dengan foto.' : 'Absen masuk berhasil.',
+    message: photoError
+      ? 'Absen masuk tercatat. Foto gagal diunggah dan akan ditandai untuk diunggah ulang.'
+      : 'Absen masuk berhasil.',
     record: {
       ...decorateRecord(data),
       check_in_photo: photoUrl,
       check_out_photo: null,
     },
     photo: photoUrl,
+    photo_error: photoError,
     location: {
       distanceM: location.distanceM,
       inside: location.inside,
@@ -196,25 +287,22 @@ router.post('/check-in', async (req, res) => {
 
 router.post('/check-out', async (req, res) => {
   const id = employeeId(req);
-  const { isMocked } = req.body || {};
-  // Anti-fake location: tolak jika GPS diekspolasi/mock
-  if (isMocked) {
-    throw new HttpError(
-      403,
-      'Akses ditolak: Lokasi terdeteksi sebagai pengaksesan mock GPS atau VPN.'
-    );
-  }
+
   const location = await evaluateLocation(req.body || {});
   assertLocationAllowed(location);
 
   const date = dateKey();
-  const existing = await findToday(id, date);
+  const existing = (await findToday(id, date)) || (await findOpenShift(id));
+
   if (!existing?.check_in_at) {
-    throw conflict('Anda belum absen masuk hari ini.');
+    throw conflict('Anda belum absen masuk.');
   }
   if (existing.check_out_at) {
-    throw conflict('Anda sudah absen pulang hari ini.');
+    throw conflict('Anda sudah absen pulang untuk shift ini.');
   }
+
+  const photo = requirePhotoPayload(req);
+  const verification = await consumeVerification(req, id);
 
   const now = new Date().toISOString();
   const minutes = minutesBetween(existing.check_in_at, now);
@@ -222,11 +310,12 @@ router.post('/check-out', async (req, res) => {
     check_out_at: now,
     ...locationFields(location, 'check_out'),
     work_duration: formatDuration(minutes),
-    lokasi_tidak_tersedia:
-      Boolean(existing.lokasi_tidak_tersedia) || !location.hasLocation || !location.available,
+    lokasi_tidak_tersedia: false,
+    face_match: verification.distance,
+    face_verified: true,
+    liveness_passed: true,
+    face_verification_id: verification.id,
   };
-
-  const photoUrl = await savePhoto(req, { employeeId: id, date, type: 'out' });
 
   const { data, error } = await db
     .from('attendance')
@@ -237,12 +326,34 @@ router.post('/check-out', async (req, res) => {
 
   if (error) throw error;
 
+  let photoUrl = null;
+  let photoError = null;
+  if (photo) {
+    const uploaded = await uploadAttendancePhotoSafe({
+      employeeId: id,
+      // Simpan pada tanggal absen masuk supaya shift malam tetap satu folder.
+      date: existing.tanggal,
+      type: 'out',
+      photo,
+    });
+    photoUrl = uploaded.url;
+    photoError = uploaded.error;
+
+    if (!photoUrl) {
+      await db.from('attendance').update({ needs_photo: true }).eq('id', data.id);
+      data.needs_photo = true;
+    }
+  }
+
   const photoMap = await attendancePhotoMap(id);
 
   res.json({
-    message: photoUrl ? 'Absen pulang berhasil dengan foto.' : 'Absen pulang berhasil.',
+    message: photoError
+      ? 'Absen pulang tercatat. Foto gagal diunggah dan akan ditandai untuk diunggah ulang.'
+      : 'Absen pulang berhasil.',
     record: attachPhotos(decorateRecord(data), photoMap),
     photo: photoUrl,
+    photo_error: photoError,
     location: {
       distanceM: location.distanceM,
       inside: location.inside,

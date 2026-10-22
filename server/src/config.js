@@ -46,6 +46,25 @@ const config = {
   lateToleranceMin: num(process.env.LATE_TOLERANCE_MIN, 0),
   geocodeEnabled: bool(process.env.GEOCODE_ENABLED, true),
 
+  // Face recognition (lihat server/src/lib/face.js)
+  // Threshold EUCLIDEAN, bukan cosine. Kalibrasi ulang dengan data asli.
+  faceVerifyThreshold: num(process.env.FACE_VERIFY_THRESHOLD, 0.45),
+  faceDuplicateThreshold: num(process.env.FACE_DUPLICATE_THRESHOLD, 0.35),
+  faceMaxFailsPerDay: num(process.env.FACE_MAX_FAILS_PER_DAY, 3),
+  faceVerifyPerMinute: num(process.env.FACE_VERIFY_PER_MINUTE, 5),
+  faceMinBrightness: num(process.env.FACE_MIN_BRIGHTNESS, 45),
+  faceMaxBrightness: num(process.env.FACE_MAX_BRIGHTNESS, 215),
+  faceMinSharpness: num(process.env.FACE_MIN_SHARPNESS, 15),
+  faceMinContrast: num(process.env.FACE_MIN_CONTRAST, 18),
+  faceMinBoxPx: num(process.env.FACE_MIN_BOX_PX, 80),
+  faceDetectorInputSize: num(process.env.FACE_DETECTOR_INPUT_SIZE, 416),
+  faceDetectorScore: num(process.env.FACE_DETECTOR_SCORE, 0.4),
+  faceMinDetectedFrames: num(process.env.FACE_MIN_DETECTED_FRAMES, 6),
+  faceMinClosedFrames: num(process.env.FACE_MIN_CLOSED_FRAMES, 2),
+  faceMaxDimension: num(process.env.FACE_MAX_DIMENSION, 640),
+  maxFacePhotoMb: num(process.env.MAX_FACE_PHOTO_MB, 4),
+  faceBodyLimit: process.env.FACE_BODY_LIMIT || '16mb',
+
   webDist: path.resolve(__dirname, '../../dist'),
 };
 

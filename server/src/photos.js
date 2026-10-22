@@ -43,6 +43,21 @@ function publicUrl(path, version) {
   return version ? `${data.publicUrl}?v=${version}` : data.publicUrl;
 }
 
+/** Validasi payload foto sebelum ada penulisan ke database. */
+function assertPhoto(photo) {
+  const parsed = parseDataUrl(photo);
+  if (!parsed) {
+    throw new HttpError(400, 'Format foto tidak valid. Kirim gambar JPEG/PNG.');
+  }
+
+  const maxBytes = config.maxPhotoMb * 1024 * 1024;
+  if (parsed.buffer.length > maxBytes) {
+    throw new HttpError(413, `Ukuran foto maksimal ${config.maxPhotoMb} MB.`);
+  }
+
+  return parsed;
+}
+
 /** Simpan foto absensi (menimpa foto lama pada tanggal & tipe yang sama). */
 async function uploadAttendancePhoto({ employeeId, date, type, photo }) {
   const parsed = parseDataUrl(photo);
@@ -69,6 +84,19 @@ async function uploadAttendancePhoto({ employeeId, date, type, photo }) {
   }
 
   return publicUrl(path, Date.now());
+}
+
+/**
+ * Versi yang tidak melempar error: absensi sudah tersimpan, foto hanya
+ * pelengkap. Kalau storage gagal, baris tetap ada dengan needs_photo=true.
+ */
+async function uploadAttendancePhotoSafe(options) {
+  try {
+    return { url: await uploadAttendancePhoto(options), error: null };
+  } catch (error) {
+    console.warn('[photos] upload gagal:', error.message);
+    return { url: null, error: error.message };
+  }
 }
 
 /**
@@ -119,7 +147,9 @@ function attachPhotos(record, photoMap) {
 }
 
 module.exports = {
+  assertPhoto,
   uploadAttendancePhoto,
+  uploadAttendancePhotoSafe,
   attendancePhotoMap,
   attachPhotos,
 };
