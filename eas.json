@@ -1,0 +1,35 @@
+{
+  "cli": {
+    "version": ">= 0.60.0"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {}
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {}
+    },
+    "production": {
+      "android": {
+        "gradleCommand": "./gradlew assembleRelease",
+        "projectId": "mobile-rn-user-project"
+      },
+      "ios": {
+        "projectId": "mobile-rn-user-project"
+      }
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appStoreSubmit": "auto"
+      },
+      "android": {
+        "releaseStatus": "draft"
+      }
+    }
+  }
+}

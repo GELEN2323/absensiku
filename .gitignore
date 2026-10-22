@@ -1,0 +1,13 @@
+node_modules/
+.expo/
+dist/
+web-build/
+server/node_modules/
+server/.env
+.env
+legacy/
+*.log
+.DS_Store
+android/.gradle/
+android/app/build/
+ios/Pods/

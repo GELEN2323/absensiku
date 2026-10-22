@@ -1,0 +1,48 @@
+{
+  "name": "mobile-rn-user",
+  "version": "1.0.0",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "web": "expo start --web",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "build:web": "node scripts/build-web.js",
+    "typecheck": "tsc --noEmit",
+    "api": "npm --prefix server start",
+    "api:dev": "npm --prefix server run dev",
+    "serve": "node server/src/index.js",
+    "qa:api": "node scripts/qa-smoke.js"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@supabase/supabase-js": "^2.118.0",
+    "date-fns": "^4.4.0",
+    "expo": "~58.0.14",
+    "expo-camera": "^58.0.10",
+    "expo-constants": "~58.0.12",
+    "expo-image-picker": "^58.0.10",
+    "expo-linking": "~58.0.13",
+    "expo-location": "~58.0.18",
+    "expo-router": "~58.0.24",
+    "expo-splash-screen": "~58.0.10",
+    "expo-status-bar": "~58.0.3",
+    "hermes-parser": "^0.20.0",
+    "lucide-react-native": "^1.59.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.0",
+    "react-native-gesture-handler": "~3.3.0",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0",
+    "react-native-svg": "15.16.0",
+    "react-native-web": "^0.21.4",
+    "react-native-webview": "14.0.1",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3"
+  },
+  "private": true
+}

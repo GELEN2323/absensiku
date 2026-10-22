@@ -1,0 +1,17 @@
+{
+  "name": "absensi-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend API untuk aplikasi absensi (Supabase + Express)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.118.0",
+    "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0"
+  }
+}
