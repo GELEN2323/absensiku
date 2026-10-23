@@ -90,6 +90,7 @@ export default function UserLayout() {
         kembali konsisten, tetapi tidak tampil sebagai tab kelima.
       */}
       <Tabs.Screen name="wajah" options={{ href: null }} />
+      <Tabs.Screen name="izin" options={{ href: null }} />
     </Tabs>
   );
 }

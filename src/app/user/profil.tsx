@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Platform, StyleSheet, Text, View } from 'react-native';
+import { useRouter } from 'expo-router';
 import Constants from 'expo-constants';
-import { LogOut, ShieldCheck, UserRound } from 'lucide-react-native';
+import { FileText, LogOut, ShieldCheck, UserRound } from 'lucide-react-native';
 import {
   Avatar,
   Badge,
@@ -20,6 +21,7 @@ import { useAuth } from '@/store/auth';
 import { colors, font, radius, spacing } from '@/theme';
 
 export default function ProfilScreen() {
+  const router = useRouter();
   const token = useAuth((state) => state.token);
   const user = useAuth((state) => state.user);
   const refreshUser = useAuth((state) => state.refreshUser);
@@ -154,10 +156,28 @@ export default function ProfilScreen() {
           </View>
           <Text style={styles.faceText}>
             {employee?.face_registered
-              ? 'Data wajah sudah tersimpan. Jika absensi berbasis wajah diaktifkan, data ini dipakai untuk verifikasi.'
-              : 'Data wajah belum terdaftar. Hubungi admin untuk melakukan pendaftaran wajah.'}
+              ? 'Data wajah sudah tersimpan. Data ini dipakai untuk verifikasi saat absen dan scan patroli.'
+              : 'Data wajah belum terdaftar. Daftarkan sekarang supaya bisa absen dan scan patroli.'}
           </Text>
         </View>
+        <Button
+          label={employee?.face_registered ? 'Perbarui data wajah' : 'Daftarkan wajah'}
+          variant={employee?.face_registered ? 'secondary' : 'primary'}
+          onPress={() => router.push('/user/wajah')}
+          icon={<ShieldCheck size={17} color={employee?.face_registered ? colors.ink : colors.white} />}
+          fullWidth
+        />
+      </Card>
+
+      <Card>
+        <SectionTitle title="Izin & sakit" hint="Ajukan izin dan pantau status persetujuannya." />
+        <Button
+          label="Buka pengajuan izin"
+          variant="secondary"
+          onPress={() => router.push('/user/izin')}
+          icon={<FileText size={17} color={colors.ink} />}
+          fullWidth
+        />
       </Card>
 
       <Card>

@@ -48,6 +48,21 @@ function check(name, ok, detail) {
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? ` — ${detail}` : ''}`);
 }
 
+/**
+ * Absensi P4 wajib menyertakan verification_id dari /api/face/verify.
+ * Smoke test tidak bisa mengambil selfie asli, jadi bukti verifikasi
+ * disisipkan langsung lewat service role dengan distance di bawah ambang.
+ */
+async function issueVerification(employeeId) {
+  const { data, error } = await db
+    .from('face_verifications')
+    .insert({ employee_id: employeeId, distance: 0.2, liveness_passed: true })
+    .select('id')
+    .single();
+  if (error) throw error;
+  return data.id;
+}
+
 async function api(pathname, options = {}) {
   const headers = { Accept: 'application/json' };
   if (options.body !== undefined) headers['Content-Type'] = 'application/json';
@@ -141,7 +156,13 @@ async function main() {
     const nearBoundary = await api('/api/attendance/check-in', {
       method: 'POST',
       token,
-      body: { lat: OFFICE.lat + 0.00144, lng: OFFICE.lng, accuracy: 30 },
+      body: {
+        lat: OFFICE.lat + 0.00144,
+        lng: OFFICE.lng,
+        accuracy: 30,
+        photo: PHOTO_DATA_URL,
+        verification_id: await issueVerification(employeeId),
+      },
     });
     check(
       'Toleransi akurasi GPS (160 m + akurasi 30 m)',
@@ -153,7 +174,11 @@ async function main() {
     const earlyOut = await api('/api/attendance/check-out', {
       method: 'POST',
       token,
-      body: { lat: OFFICE.lat, lng: OFFICE.lng },
+      body: {
+        lat: OFFICE.lat,
+        lng: OFFICE.lng,
+        verification_id: await issueVerification(employeeId),
+      },
     });
     check('POST /api/attendance/check-out', earlyOut.status === 200, `status ${earlyOut.status}`);
 
@@ -166,7 +191,13 @@ async function main() {
     const checkIn = await api('/api/attendance/check-in', {
       method: 'POST',
       token,
-      body: { lat: OFFICE.lat, lng: OFFICE.lng, accuracy: 12, photo: PHOTO_DATA_URL },
+      body: {
+        lat: OFFICE.lat,
+        lng: OFFICE.lng,
+        accuracy: 12,
+        photo: PHOTO_DATA_URL,
+        verification_id: await issueVerification(employeeId),
+      },
     });
     const photoUrl = checkIn.json?.record?.check_in_photo || null;
     check(
@@ -199,7 +230,13 @@ async function main() {
     const checkOut = await api('/api/attendance/check-out', {
       method: 'POST',
       token,
-      body: { lat: OFFICE.lat, lng: OFFICE.lng, accuracy: 15, photo: PHOTO_DATA_URL },
+      body: {
+        lat: OFFICE.lat,
+        lng: OFFICE.lng,
+        accuracy: 15,
+        photo: PHOTO_DATA_URL,
+        verification_id: await issueVerification(employeeId),
+      },
     });
     check(
       'POST /api/attendance/check-out + foto',
@@ -230,6 +267,39 @@ async function main() {
         Boolean(history.json?.records?.[0]?.check_in_photo),
       `status ${history.status}`
     );
+
+    // 11. Patroli & izin (P6/P7)
+    const patrolToday = await api('/api/patrol/today', { token });
+    check(
+      'GET /api/patrol/today',
+      patrolToday.status === 200 && Array.isArray(patrolToday.json?.checkpoints),
+      `status ${patrolToday.status}`
+    );
+
+    const izinCreate = await api('/api/izin', {
+      method: 'POST',
+      token,
+      body: { tanggal: todayDate, alasan: 'QA smoke test pengajuan izin' },
+    });
+    check(
+      'POST /api/izin',
+      izinCreate.status === 201 && izinCreate.json?.item?.status === 'pending',
+      `status ${izinCreate.status}`
+    );
+
+    const izinList = await api('/api/izin', { token });
+    check(
+      'GET /api/izin',
+      izinList.status === 200 && (izinList.json?.items?.length || 0) >= 1,
+      `status ${izinList.status}`
+    );
+
+    const izinDuplicate = await api('/api/izin', {
+      method: 'POST',
+      token,
+      body: { tanggal: todayDate, alasan: 'QA smoke test pengajuan izin ganda' },
+    });
+    check('Izin pending ganda ditolak', izinDuplicate.status === 409, `status ${izinDuplicate.status}`);
 
     // 11. Admin
     const summary = await api('/api/admin/summary', { token });
@@ -294,6 +364,9 @@ async function main() {
         }
       }
       if (employeeId) await db.from('attendance').delete().eq('employee_id', employeeId);
+      if (employeeId) await db.from('izin').delete().eq('user_id', employeeId);
+      if (employeeId) await db.from('patrol_logs').delete().eq('user_id', employeeId);
+      if (employeeId) await db.from('face_verifications').delete().eq('employee_id', employeeId);
       if (userId) await db.from('profiles').delete().eq('id', userId);
       if (employeeId) await db.from('employees').delete().eq('id', employeeId);
       if (userId) await db.auth.admin.deleteUser(userId);

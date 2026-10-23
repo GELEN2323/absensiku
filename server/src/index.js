@@ -25,6 +25,7 @@ const attendanceRoutes = require('./routes/attendance');
 const adminRoutes = require('./routes/admin');
 const faceRoutes = require('./routes/face');
 const patrolRoutes = require('./routes/patrol');
+const izinRoutes = require('./routes/izin');
 const { loadFaceApi } = require('./lib/face');
 
 const app = express();
@@ -71,6 +72,7 @@ app.use('/api/face', express.json({ limit: config.faceBodyLimit }), faceRoutes);
 const photoJson = express.json({ limit: config.photoBodyLimit });
 app.use('/api/attendance', photoJson, attendanceRoutes);
 app.use('/api/patrol', photoJson, patrolRoutes);
+app.use('/api/izin', photoJson, izinRoutes);
 
 app.use(express.json({ limit: '1mb' }));
 
