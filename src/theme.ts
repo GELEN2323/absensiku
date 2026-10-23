@@ -20,6 +20,8 @@ export const colors = {
   successSoft: '#DCFCE7',
   info: '#1D4ED8',
   infoSoft: '#DBEAFE',
+  purple: '#7E22CE',
+  purpleSoft: '#F3E8FF',
   white: '#FFFFFF',
   overlay: 'rgba(11, 18, 32, 0.45)',
 };

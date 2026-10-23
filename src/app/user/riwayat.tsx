@@ -1,11 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import {
   CalendarDays,
   ChevronLeft,
   ChevronRight,
   Clock,
+  FileText,
   MapPin,
   RefreshCw,
 } from 'lucide-react-native';
@@ -29,9 +38,19 @@ import {
   formatTime,
   shiftMonth,
 } from '@/lib/format';
-import type { HistoryResponse } from '@/lib/types';
+import type { AttendanceRecord, HistoryResponse } from '@/lib/types';
 import { useAuth } from '@/store/auth';
 import { colors, font, radius, spacing } from '@/theme';
+
+type StatusTone = 'success' | 'warning' | 'info' | 'purple' | 'muted';
+
+function statusTone(status: AttendanceRecord['status']): StatusTone {
+  if (status === 'Terlambat') return 'warning';
+  if (status === 'Pulang') return 'info';
+  if (status === 'Izin') return 'purple';
+  if (status === 'Tanpa Keterangan' || status === 'Belum absen') return 'muted';
+  return 'success';
+}
 
 export default function RiwayatScreen() {
   const router = useRouter();
@@ -81,7 +100,16 @@ export default function RiwayatScreen() {
   const summary = data?.summary;
 
   return (
-    <Screen>
+    <Screen
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={() => load(true)}
+          colors={[colors.brand]}
+          tintColor={colors.brand}
+        />
+      }
+    >
       <PageHeader
         eyebrow="RIWAYAT"
         title="Riwayat absensi"
@@ -171,10 +199,8 @@ export default function RiwayatScreen() {
                 </View>
                 <View style={styles.badges}>
                   {record.ongoing ? <Badge label="Belum pulang" tone="info" /> : null}
-                  <Badge
-                    label={record.status}
-                    tone={record.status === 'Terlambat' ? 'warning' : 'success'}
-                  />
+                  {record.check_out_at ? <Badge label="Pulang" tone="info" /> : null}
+                  <Badge label={record.status} tone={statusTone(record.status)} />
                 </View>
               </View>
 
@@ -222,6 +248,13 @@ export default function RiwayatScreen() {
           ))}
         </View>
       )}
+
+      <Button
+        label="Ajukan izin / sakit"
+        variant="secondary"
+        onPress={() => router.push('/user/izin')}
+        icon={<FileText size={17} color={colors.ink} />}
+      />
 
       <Button
         label="Kembali ke absensi"

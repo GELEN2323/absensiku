@@ -31,9 +31,11 @@ type ScreenProps = {
   children: React.ReactNode;
   scroll?: boolean;
   contentStyle?: StyleProp<ViewStyle>;
+  /** Untuk pull-to-refresh di layar berbasis ScrollView. */
+  refreshControl?: React.ReactElement;
 };
 
-export function Screen({ children, scroll = true, contentStyle }: ScreenProps) {
+export function Screen({ children, scroll = true, contentStyle, refreshControl }: ScreenProps) {
   if (!scroll) {
     return (
       <View style={styles.screen}>
@@ -47,6 +49,7 @@ export function Screen({ children, scroll = true, contentStyle }: ScreenProps) {
       style={styles.screen}
       contentContainerStyle={styles.scrollContent}
       showsVerticalScrollIndicator={false}
+      refreshControl={refreshControl}
     >
       <View style={[styles.inner, contentStyle]}>{children}</View>
     </ScrollView>
@@ -224,7 +227,7 @@ export function TextField({ label, error, hint, right, style, ...props }: TextFi
 /* Display                                                             */
 /* ------------------------------------------------------------------ */
 
-type BadgeTone = 'success' | 'warning' | 'danger' | 'info' | 'muted' | 'brand';
+type BadgeTone = 'success' | 'warning' | 'danger' | 'info' | 'muted' | 'brand' | 'purple';
 
 export function Badge({ label, tone = 'muted' }: { label: string; tone?: BadgeTone }) {
   return (
@@ -236,6 +239,7 @@ export function Badge({ label, tone = 'muted' }: { label: string; tone?: BadgeTo
         tone === 'danger' && { backgroundColor: colors.dangerSoft },
         tone === 'info' && { backgroundColor: colors.infoSoft },
         tone === 'brand' && { backgroundColor: colors.brandSoft },
+        tone === 'purple' && { backgroundColor: colors.purpleSoft },
       ]}
     >
       <Text
@@ -246,6 +250,7 @@ export function Badge({ label, tone = 'muted' }: { label: string; tone?: BadgeTo
           tone === 'danger' && { color: colors.danger },
           tone === 'info' && { color: colors.info },
           tone === 'brand' && { color: colors.brand },
+          tone === 'purple' && { color: colors.purple },
         ]}
       >
         {label}
