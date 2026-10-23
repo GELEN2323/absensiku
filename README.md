@@ -139,3 +139,4 @@ Geofence dihitung di server dari `OFFICE_*`, jadi koordinat dari client hanya us
 
 Build web sengaja mengosongkan `EXPO_PUBLIC_API_URL` supaya browser memanggil API
 di origin yang sama, bukan `localhost` milik pengguna.
+# absensiku
