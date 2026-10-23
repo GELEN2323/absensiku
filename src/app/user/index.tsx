@@ -166,7 +166,11 @@ export default function AbsensiScreen() {
   }, []);
 
   const target = useMemo(() => {
-    if (today?.nearest) {
+    if (
+      today?.nearest &&
+      Number.isFinite(today.nearest.lat) &&
+      Number.isFinite(today.nearest.lng)
+    ) {
       return {
         name: today.nearest.nama,
         lat: today.nearest.lat,

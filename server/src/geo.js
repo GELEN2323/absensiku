@@ -76,9 +76,26 @@ async function nearestAttendancePoint(lat, lng) {
     if (error || !Array.isArray(data) || data.length === 0) return null;
 
     const nearest = data[0];
+    let lat = nearest.lat;
+    let lng = nearest.lng;
+
+    // Kompatibilitas dengan RPC lama yang belum mengembalikan lat/lng.
+    if ((lat === null || lat === undefined || lng === null || lng === undefined) && nearest.location_id) {
+      const { db } = require('./supabase');
+      const { data: point } = await db
+        .from('locations')
+        .select('lat, lng')
+        .eq('id', nearest.location_id)
+        .maybeSingle();
+      lat = point?.lat ?? null;
+      lng = point?.lng ?? null;
+    }
+
     return {
       id: nearest.location_id || null,
       name: nearest.nama || config.office.name,
+      lat: lat === null || lat === undefined ? null : Number(lat),
+      lng: lng === null || lng === undefined ? null : Number(lng),
       distanceM: Math.round(Number(nearest.distance_m) || 0),
       radiusM: Number(nearest.radius_meter) || config.office.radiusM,
     };

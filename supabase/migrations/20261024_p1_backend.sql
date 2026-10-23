@@ -289,6 +289,8 @@ create or replace function check_geofence(
 returns table (
   location_id  uuid,
   nama         text,
+  lat          double precision,
+  lng          double precision,
   distance_m   double precision,
   radius_meter integer,
   inside       boolean
@@ -301,6 +303,8 @@ as $$
   )
   select l.id,
          l.nama,
+         l.lat,
+         l.lng,
          st_distance(st_setsrid(st_makepoint(l.lng, l.lat), 4326)::geography, p.g),
          l.radius_meter,
          st_dwithin(
@@ -312,7 +316,7 @@ as $$
    cross join posisi p
    where l.aktif
      and (p_location_id is null or l.id = p_location_id)
-   order by 3 asc;
+   order by distance_m asc;
 $$;
 
 revoke all on function check_geofence(double precision, double precision, uuid) from public;
