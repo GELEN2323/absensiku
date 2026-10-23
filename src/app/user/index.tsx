@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
@@ -18,6 +18,7 @@ import {
   Navigation,
   RefreshCw,
   ShieldCheck,
+  UserRoundCheck,
 } from 'lucide-react-native';
 import {
   Badge,
@@ -30,7 +31,7 @@ import {
   Screen,
   SectionTitle,
 } from '@/components/ui';
-import { CameraCapture } from '@/components/CameraCapture';
+import { FaceLiveness } from '@/components/FaceLiveness';
 import { api, ApiError } from '@/lib/api';
 import { formatDateKey, formatDistance, formatTime, greeting, todayKey } from '@/lib/format';
 import {
@@ -45,10 +46,14 @@ import { colors, font, radius, spacing } from '@/theme';
 
 type Feedback = { tone: 'success' | 'error' | 'info' | 'warning'; message: string } | null;
 
+const MAX_ACCURACY_M = 50;
+const MAX_RADIUS_TOLERANCE_M = 25;
+
 export default function AbsensiScreen() {
   const router = useRouter();
   const token = useAuth((state) => state.token);
   const user = useAuth((state) => state.user);
+  const refreshUser = useAuth((state) => state.refreshUser);
   const signOut = useAuth((state) => state.signOut);
 
   const [today, setToday] = useState<TodayResponse | null>(null);
@@ -60,22 +65,44 @@ export default function AbsensiScreen() {
   const [locating, setLocating] = useState(false);
   const [locationError, setLocationError] = useState<string | null>(null);
 
+  const [faceRegistered, setFaceRegistered] = useState<boolean | null>(null);
+  const [faceError, setFaceError] = useState<string | null>(null);
+
   const [submitting, setSubmitting] = useState<'in' | 'out' | null>(null);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [clock, setClock] = useState(() => formatTime(new Date().toISOString()));
 
-  const [cameraMode, setCameraMode] = useState<'in' | 'out' | null>(null);
+  const [livenessMode, setLivenessMode] = useState<'in' | 'out' | null>(null);
 
   const load = useCallback(
-    async (soft = false) => {
+    async (soft = false, at: Position | null = null) => {
       if (!token) return;
       if (soft) setRefreshing(true);
       else setLoading(true);
       setError(null);
 
       try {
-        const data = await api.today(token);
+        const data = await api.today(token, at);
         setToday(data);
+
+        // Status wajah dipisah: kegagalan di sini tidak boleh menghilangkan
+        // data absensi yang sudah berhasil dimuat.
+        try {
+          const face = await api.faceStatus(token);
+          setFaceRegistered(face.face_registered);
+          setFaceError(null);
+        } catch (faceCaught) {
+          if (faceCaught instanceof ApiError && faceCaught.status === 401) {
+            await signOut();
+            return;
+          }
+          setFaceRegistered(false);
+          setFaceError(
+            faceCaught instanceof Error
+              ? faceCaught.message
+              : 'Status pendaftaran wajah tidak bisa dimuat.'
+          );
+        }
       } catch (caught) {
         if (caught instanceof ApiError && caught.status === 401) {
           await signOut();
@@ -105,6 +132,16 @@ export default function AbsensiScreen() {
     try {
       const next = await getCurrentPosition();
       setPosition(next);
+      if (next.mocked) {
+        setLocationError('Lokasi palsu (mock GPS) terdeteksi. Matikan aplikasi Fake GPS.');
+      }
+      // Minta server menentukan titik absen terdekat untuk posisi ini.
+      if (token) {
+        api
+          .today(token, next)
+          .then((data) => setToday(data))
+          .catch(() => undefined);
+      }
     } catch (caught) {
       const message =
         caught instanceof LocationError
@@ -114,99 +151,119 @@ export default function AbsensiScreen() {
     } finally {
       setLocating(false);
     }
-  }, []);
+  }, [token]);
 
   useEffect(() => {
-    // Generate challenge acak untuk liveness detection setiap kali layar absensi dibuka
-    const challengeCode = Math.random().toString(36).substring(2, 8).toUpperCase();
-
-    // Start countdown timer
-    const timer = setTimeout(() => {
-      // After 10 seconds, challenge expires, can reset or mark as failed
-    }, 10000);
-
     const stop = watchPosition(
       (next) => {
         setPosition(next);
-        setLocationError(null);
+        setLocationError(next.mocked ? 'Lokasi palsu (mock GPS) terdeteksi.' : null);
       },
       () => undefined
     );
 
-    return () => {
-      clearTimeout(timer);
-      stop();
-    };
+    return stop;
   }, []);
 
+  const target = useMemo(() => {
+    if (today?.nearest) {
+      return {
+        name: today.nearest.nama,
+        lat: today.nearest.lat,
+        lng: today.nearest.lng,
+        radiusM: today.nearest.radius_meter,
+      };
+    }
+    if (today?.office) {
+      return {
+        name: today.office.name,
+        lat: today.office.lat,
+        lng: today.office.lng,
+        radiusM: today.office.radiusM,
+      };
+    }
+    return null;
+  }, [today]);
+
   const distance =
-    position && today
-      ? haversineMeters(position.lat, position.lng, today.office.lat, today.office.lng)
-      : null;
-  const inside = distance !== null && today ? distance <= today.office.radiusM : false;
+    position && target ? haversineMeters(position.lat, position.lng, target.lat, target.lng) : null;
+
+  const radiusTolerance =
+    position?.accuracy === null || position?.accuracy === undefined
+      ? 0
+      : Math.min(position.accuracy, MAX_RADIUS_TOLERANCE_M);
+  const inside = distance !== null && target ? distance <= target.radiusM + radiusTolerance : false;
+
+  const accuracyTooLow =
+    position?.accuracy !== null &&
+    position?.accuracy !== undefined &&
+    position.accuracy > MAX_ACCURACY_M;
+  const mocked = position?.mocked === true;
 
   const record = today?.record || null;
   const hasIn = Boolean(record?.check_in_at);
   const hasOut = Boolean(record?.check_out_at);
-  const busy = submitting !== null;
+  const busy = submitting !== null || livenessMode !== null;
 
-  const outside = distance !== null && today !== null && !inside;
+  const outside = distance !== null && target !== null && !inside;
+
+  const beginVerification = (type: 'in' | 'out') => {
+    setFeedback(null);
+
+    if (!position) {
+      handleLocate();
+      return;
+    }
+    if (mocked) {
+      setFeedback({
+        tone: 'error',
+        message: 'Lokasi palsu (mock GPS) terdeteksi. Matikan aplikasi Fake GPS lalu coba lagi.',
+      });
+      return;
+    }
+    if (accuracyTooLow) {
+      setFeedback({
+        tone: 'warning',
+        message: `Akurasi GPS ±${position.accuracy} m. Tunggu sampai akurasi ≤ ${MAX_ACCURACY_M} m, lalu coba lagi.`,
+      });
+      return;
+    }
+    if (!inside && target) {
+      setFeedback({
+        tone: 'error',
+        message: `Kamu berada ${formatDistance(distance)} dari ${target.name}. Radius absensi ${formatDistance(target.radiusM)}.`,
+      });
+      return;
+    }
+    if (!faceRegistered) {
+      setFeedback({
+        tone: 'warning',
+        message: faceError
+          ? `Verifikasi wajah belum bisa dipakai: ${faceError}`
+          : 'Registrasikan wajah dulu sebelum absen.',
+      });
+      return;
+    }
+
+    setLivenessMode(type);
+  };
 
   const submit = async (
     type: 'in' | 'out',
-    options: { withLocation?: boolean; photo?: string | null } = {}
+    payload: { verificationId: string; photo: string }
   ) => {
-    const { withLocation = true, photo = null } = options;
-    if (!token || busy) return;
+    if (!token || !position) return;
     setSubmitting(type);
     setFeedback(null);
-
-    let current = withLocation ? position : null;
-
-    if (withLocation && !current) {
-      try {
-        current = await getCurrentPosition();
-        setPosition(current);
-        setLocationError(null);
-      } catch (caught) {
-        const message =
-          caught instanceof LocationError
-            ? caught.message
-            : 'Lokasi tidak tersedia. Periksa izin GPS dan koneksi.';
-        setLocationError(message);
-        setSubmitting(null);
-        setFeedback({
-          tone: 'error',
-          message: `${message} Kamu masih bisa absen tanpa lokasi jika diizinkan.`,
-        });
-        return;
-      }
-    }
-
-    if (current && today) {
-      const currentDistance = haversineMeters(
-        current.lat,
-        current.lng,
-        today.office.lat,
-        today.office.lng
-      );
-      if (currentDistance > today.office.radiusM) {
-        setSubmitting(null);
-        setFeedback({
-          tone: 'error',
-          message: `Kamu berada ${formatDistance(currentDistance)} dari ${today.office.name}. Radius absensi ${formatDistance(today.office.radiusM)}.`,
-        });
-        return;
-      }
-    }
 
     try {
       const result =
         type === 'in'
-          ? await api.checkIn(token, withLocation ? current : null, photo)
-          : await api.checkOut(token, withLocation ? current : null, photo);
+          ? await api.checkIn(token, position, payload.photo, payload.verificationId)
+          : await api.checkOut(token, position, payload.photo, payload.verificationId);
       setFeedback({ tone: 'success', message: result.message });
-      await load(true);
+      await load(true, position);
+      refreshUser().catch(() => undefined);
     } catch (caught) {
       if (caught instanceof ApiError && caught.status === 401) {
         await signOut();
@@ -236,7 +293,6 @@ export default function AbsensiScreen() {
   }
 
   const firstName = user?.nama?.split(' ')[0] || 'Karyawan';
-  const office = today?.office;
 
   return (
     <Screen>
@@ -262,7 +318,7 @@ export default function AbsensiScreen() {
             <Clock size={13} color={colors.white} />
             <Text style={styles.heroBadgeText}>{today?.hari || 'Hari ini'}</Text>
           </View>
-          <Text style={styles.heroOffice}>{office?.name || 'Kantor'}</Text>
+          <Text style={styles.heroOffice}>{target?.name || 'Kantor'}</Text>
         </View>
 
         <View style={styles.clockRow}>
@@ -276,7 +332,7 @@ export default function AbsensiScreen() {
             <Text style={styles.heroLocationText}>
               {distance === null
                 ? 'Lokasi belum aktif'
-                : `${formatDistance(distance)} dari kantor`}
+                : `${formatDistance(distance)} dari ${target?.name || 'kantor'}`}
             </Text>
           </View>
           <View
@@ -288,11 +344,27 @@ export default function AbsensiScreen() {
             <View
               style={[
                 styles.dot,
-                { backgroundColor: inside ? '#4ADE80' : distance === null ? '#94A3B8' : '#FBBF24' },
+                {
+                  backgroundColor: mocked
+                    ? '#F87171'
+                    : inside
+                      ? '#4ADE80'
+                      : distance === null
+                        ? '#94A3B8'
+                        : '#FBBF24',
+                },
               ]}
             />
             <Text style={styles.heroStatusText}>
-              {inside ? 'Dalam radius' : distance === null ? 'GPS belum aktif' : 'Di luar radius'}
+              {mocked
+                ? 'GPS palsu'
+                : accuracyTooLow
+                  ? 'Akurasi rendah'
+                  : inside
+                    ? 'Dalam radius'
+                    : distance === null
+                      ? 'GPS belum aktif'
+                      : 'Di luar radius'}
             </Text>
           </View>
         </View>
@@ -405,10 +477,12 @@ export default function AbsensiScreen() {
           <View style={styles.actionRow}>
             {!hasIn ? (
               <Button
-                label={position ? 'Ambil foto & absen masuk' : 'Aktifkan lokasi & absen masuk'}
-                onPress={() => (position ? setCameraMode('in') : handleLocate())}
+                label={
+                  position ? 'Verifikasi wajah & absen masuk' : 'Aktifkan lokasi & absen masuk'
+                }
+                onPress={() => (position ? beginVerification('in') : handleLocate())}
                 loading={submitting === 'in' || (locating && !position)}
-                disabled={busy || outside || locating}
+                disabled={busy || outside || locating || !faceRegistered}
                 icon={
                   position ? (
                     <Camera size={17} color={colors.white} />
@@ -420,10 +494,12 @@ export default function AbsensiScreen() {
               />
             ) : (
               <Button
-                label={position ? 'Ambil foto & absen pulang' : 'Aktifkan lokasi & absen pulang'}
-                onPress={() => (position ? setCameraMode('out') : handleLocate())}
+                label={
+                  position ? 'Verifikasi wajah & absen pulang' : 'Aktifkan lokasi & absen pulang'
+                }
+                onPress={() => (position ? beginVerification('out') : handleLocate())}
                 loading={submitting === 'out' || (locating && !position)}
-                disabled={busy || outside || locating}
+                disabled={busy || outside || locating || !faceRegistered}
                 icon={
                   position ? (
                     <Camera size={17} color={colors.white} />
@@ -437,22 +513,46 @@ export default function AbsensiScreen() {
           </View>
         )}
 
-        {outside ? (
+        {faceRegistered === false && !hasOut ? (
           <Notice
             tone="warning"
-            message={`Posisi kamu ${formatDistance(distance)} dari kantor. Mendekatlah ke area absensi (${formatDistance(office?.radiusM || 0)}).`}
+            title="Wajah belum terdaftar"
+            message={
+              faceError ||
+              'Absensi wajib memakai verifikasi wajah. Daftarkan wajah sekali, lalu absen seperti biasa.'
+            }
           />
         ) : null}
 
-        {!hasOut && locationError ? (
-          <Pressable
-            onPress={() => submit(hasIn ? 'out' : 'in', { withLocation: false })}
-            style={styles.noLocation}
-          >
-            <Text style={styles.noLocationText}>
-              {hasIn ? 'Absen pulang tanpa lokasi' : 'Absen masuk tanpa lokasi'}
-            </Text>
-          </Pressable>
+        {faceRegistered === false && !hasOut ? (
+          <Button
+            label="Daftarkan wajah sekarang"
+            variant="secondary"
+            onPress={() => router.push('/user/wajah')}
+            icon={<UserRoundCheck size={17} color={colors.ink} />}
+            fullWidth
+          />
+        ) : null}
+
+        {outside ? (
+          <Notice
+            tone="warning"
+            message={`Posisi kamu ${formatDistance(distance)} dari ${target?.name || 'kantor'}. Mendekatlah ke area absensi (${formatDistance(target?.radiusM || 0)}).`}
+          />
+        ) : null}
+
+        {accuracyTooLow ? (
+          <Notice
+            tone="warning"
+            message={`Akurasi GPS ±${position?.accuracy} m. Tunggu sampai akurasi ≤ ${MAX_ACCURACY_M} m sebelum absen.`}
+          />
+        ) : null}
+
+        {mocked ? (
+          <Notice
+            tone="error"
+            message="Lokasi palsu (mock GPS) terdeteksi. Matikan aplikasi Fake GPS lalu perbarui lokasi."
+          />
         ) : null}
 
         {hasOut ? (
@@ -467,30 +567,41 @@ export default function AbsensiScreen() {
       <Card>
         <SectionTitle
           title="Lokasi & radius"
-          hint="Validasi dilakukan di server memakai koordinat kantor."
-          right={<Badge label={inside ? 'Dalam area' : 'Belum terverifikasi'} tone={inside ? 'success' : 'muted'} />}
+          hint="Validasi radius dan waktu dilakukan di server."
+          right={
+            <Badge
+              label={mocked ? 'GPS palsu' : inside ? 'Dalam area' : 'Belum terverifikasi'}
+              tone={mocked ? 'danger' : inside ? 'success' : 'muted'}
+            />
+          }
         />
 
         <View style={styles.locationGrid}>
           <View style={styles.locationItem}>
             <Text style={styles.locationLabel}>Status GPS</Text>
             <Text style={styles.locationValue}>
-              {position ? 'Aktif' : locating ? 'Mencari...' : 'Belum aktif'}
+              {mocked ? 'Palsu' : position ? 'Aktif' : locating ? 'Mencari...' : 'Belum aktif'}
             </Text>
           </View>
           <View style={styles.locationItem}>
             <Text style={styles.locationLabel}>Akurasi</Text>
-            <Text style={styles.locationValue}>
-              {position?.accuracy ? `±${position.accuracy} m` : '—'}
+            <Text style={[styles.locationValue, accuracyTooLow && styles.locationValueWarning]}>
+              {position?.accuracy !== null && position?.accuracy !== undefined
+                ? `±${position.accuracy} m`
+                : '—'}
             </Text>
           </View>
           <View style={styles.locationItem}>
-            <Text style={styles.locationLabel}>Jarak ke kantor</Text>
-            <Text style={styles.locationValue}>{formatDistance(distance)}</Text>
+            <Text style={styles.locationLabel}>Titik absen terdekat</Text>
+            <Text style={styles.locationValue} numberOfLines={1}>
+              {target?.name || '—'}
+            </Text>
           </View>
           <View style={styles.locationItem}>
-            <Text style={styles.locationLabel}>Radius izin</Text>
-            <Text style={styles.locationValue}>{formatDistance(office?.radiusM)}</Text>
+            <Text style={styles.locationLabel}>Jarak / radius</Text>
+            <Text style={styles.locationValue}>
+              {formatDistance(distance)} / {formatDistance(target?.radiusM)}
+            </Text>
           </View>
         </View>
 
@@ -504,6 +615,37 @@ export default function AbsensiScreen() {
         />
 
         {locationError ? <Notice tone="error" message={locationError} /> : null}
+      </Card>
+
+      <Card>
+        <SectionTitle
+          title="Verifikasi wajah"
+          hint="Liveness acak + pencocokan wajah di server."
+          right={
+            <Badge
+              label={faceRegistered ? 'Siap' : 'Belum siap'}
+              tone={faceRegistered ? 'success' : 'warning'}
+            />
+          }
+        />
+        <View style={styles.faceRow}>
+          <View style={styles.faceIcon}>
+            <ShieldCheck size={22} color={faceRegistered ? colors.success : colors.accent} />
+          </View>
+          <Text style={styles.faceText}>
+            {faceRegistered
+              ? 'Wajah sudah terdaftar. Setiap absen memakai tantangan liveness acak dan foto terwatermark NIK + waktu server.'
+              : faceError ||
+                'Daftarkan wajah 3 pose (depan, kiri, kanan) sebelum bisa absen. Prosesnya hanya sekali.'}
+          </Text>
+        </View>
+        <Button
+          label={faceRegistered ? 'Perbarui data wajah' : 'Daftarkan wajah'}
+          variant="secondary"
+          onPress={() => router.push('/user/wajah')}
+          icon={<UserRoundCheck size={17} color={colors.ink} />}
+          fullWidth
+        />
       </Card>
 
       <Card style={styles.tipCard}>
@@ -524,22 +666,18 @@ export default function AbsensiScreen() {
         <Text style={styles.secureText}>Data absensi disimpan di server perusahaan.</Text>
       </View>
 
-      <CameraCapture
-        visible={cameraMode !== null}
-        title={cameraMode === 'in' ? 'Foto absen masuk' : 'Foto absen pulang'}
-        subtitle="Foto jadi bukti kehadiran dan disimpan di server. Pastikan wajah terlihat jelas."
-        busy={busy}
-        onCancel={() => setCameraMode(null)}
-        onConfirm={(dataUrl) => {
-          const mode = cameraMode;
-          setCameraMode(null);
-          if (mode) submit(mode, { photo: dataUrl });
+      <FaceLiveness
+        visible={livenessMode !== null}
+        token={token}
+        title={livenessMode === 'in' ? 'Verifikasi wajah · absen masuk' : 'Verifikasi wajah · absen pulang'}
+        subtitle="Kamera akan merekam beberapa frame. Ikuti tantangan liveness di layar."
+        onCancel={() => setLivenessMode(null)}
+        onVerified={({ verificationId, photo }) => {
+          const mode = livenessMode;
+          setLivenessMode(null);
+          if (mode) submit(mode, { verificationId, photo });
         }}
-        onSkip={() => {
-          const mode = cameraMode;
-          setCameraMode(null);
-          if (mode) submit(mode, { photo: null });
-        }}
+        onBlocked={(message) => setFeedback({ tone: 'error', message })}
       />
 
       <PageFooter />
@@ -775,6 +913,30 @@ const styles = StyleSheet.create({
     color: colors.ink,
     fontSize: font.body,
     fontWeight: '700',
+  },
+  locationValueWarning: {
+    color: colors.accent,
+  },
+  faceRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
+    marginTop: spacing.md,
+  },
+  faceIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: colors.surfaceAlt,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  faceText: {
+    flex: 1,
+    color: colors.inkSoft,
+    fontSize: font.small,
+    lineHeight: 18,
+    paddingTop: 2,
   },
   tipCard: {
     flexDirection: 'row',

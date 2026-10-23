@@ -65,10 +65,14 @@ app.get('/api/office', (_req, res) => {
 // kalau tidak body 3 foto akan ditolak 413 sebelum route-nya jalan.
 app.use('/api/face', express.json({ limit: config.faceBodyLimit }), faceRoutes);
 
+// Endpoint dengan foto (absensi, patroli, izin) juga butuh limit lebih besar
+// dari parser global supaya base64 foto tidak ditolak 413.
+const photoJson = express.json({ limit: config.photoBodyLimit });
+app.use('/api/attendance', photoJson, attendanceRoutes);
+
 app.use(express.json({ limit: '1mb' }));
 
 app.use('/api/auth', authRoutes);
-app.use('/api/attendance', attendanceRoutes);
 app.use('/api/admin', adminRoutes);
 
 app.use('/api', (_req, res) => {

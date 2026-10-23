@@ -92,11 +92,31 @@ function lastNDates(n) {
   return Array.from({ length: n }, (_, i) => shiftDate(today, -(n - 1 - i)));
 }
 
+/**
+ * Waktu server dari RPC `get_server_now()` (P1).
+ * Dipakai untuk semua timestamp absensi supaya jam perangkat tidak bisa dipalsukan.
+ * Fallback ke jam server proses kalau RPC belum tersedia.
+ */
+async function serverNow() {
+  try {
+    const { db } = require('./supabase');
+    const { data, error } = await db.rpc('get_server_now');
+    if (!error && data) {
+      const parsed = new Date(data);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+  } catch {
+    // Migrasi belum dijalankan / RPC tidak tersedia.
+  }
+  return new Date();
+}
+
 module.exports = {
   dateKey,
   hariName,
   timeKey,
   isLate,
+  serverNow,
   minutesBetween,
   formatDuration,
   shiftDate,

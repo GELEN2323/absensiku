@@ -2,10 +2,32 @@
 
 const { isLate, minutesBetween, formatDuration } = require('./time');
 
+const KNOWN_STATUS = new Set([
+  'Hadir',
+  'Terlambat',
+  'Pulang',
+  'Izin',
+  'Tanpa Keterangan',
+]);
+
 function decorateRecord(record) {
   if (!record) return null;
 
-  const late = Boolean(record.check_in_at) && isLate(record.check_in_at);
+  // Status dari database (dihitung trigger/server memakai settings) menang.
+  // Fallback isLate hanya untuk baris lama yang statusnya belum terisi.
+  const stored = KNOWN_STATUS.has(record.status) ? record.status : null;
+  const late = record.check_in_at
+    ? stored === 'Terlambat' || (stored !== 'Hadir' && isLate(record.check_in_at))
+    : false;
+  const status = record.check_in_at
+    ? stored === 'Hadir' || stored === 'Terlambat'
+      ? stored
+      : late
+        ? 'Terlambat'
+        : 'Hadir'
+    : stored && stored !== 'Pulang'
+      ? stored
+      : 'Belum absen';
   const minutes =
     record.check_in_at && record.check_out_at
       ? minutesBetween(record.check_in_at, record.check_out_at)
@@ -14,7 +36,7 @@ function decorateRecord(record) {
   return {
     ...record,
     late,
-    status: record.check_in_at ? (late ? 'Terlambat' : 'Hadir') : 'Belum absen',
+    status,
     ongoing: Boolean(record.check_in_at) && !record.check_out_at,
     duration: record.work_duration || (minutes > 0 ? formatDuration(minutes) : null),
     duration_minutes: minutes,
@@ -49,7 +71,9 @@ function attachEmployees(records = [], employees = []) {
 
 function summarize(records = []) {
   const present = records.filter((record) => record.check_in_at);
-  const late = present.filter((record) => isLate(record.check_in_at));
+  const late = present.filter(
+    (record) => record.status === 'Terlambat' || isLate(record.check_in_at)
+  );
   const completed = present.filter((record) => record.check_out_at);
   const totalMinutes = completed.reduce(
     (total, record) => total + minutesBetween(record.check_in_at, record.check_out_at),

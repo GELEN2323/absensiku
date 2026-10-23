@@ -4,8 +4,17 @@ const express = require('express');
 const config = require('../config');
 const { db } = require('../supabase');
 const { requireAuth } = require('../auth');
-const { evaluateLocation } = require('../geo');
-const { dateKey, hariName, timeKey, minutesBetween, formatDuration, monthRange } = require('../time');
+const { evaluateLocation, nearestPoint, parseCoord } = require('../geo');
+const {
+  dateKey,
+  hariName,
+  timeKey,
+  minutesBetween,
+  formatDuration,
+  monthRange,
+  serverNow,
+} = require('../time');
+const { loadWorkSettings, attendanceStatus } = require('../settings');
 const { decorateRecord, summarize } = require('../attendance-utils');
 const {
   assertPhoto,
@@ -63,8 +72,15 @@ async function findOpenShift(employeeIdValue) {
 }
 
 function assertLocationAllowed(location) {
-  // Lokasi wajib. Klien tetap tidak dipercaya soal koordinat, tapi minimal
-  // tidak ada lagi jalan pintas "absen tanpa lokasi" seperti di audit.
+  // P4/P14: mock GPS ditolak. Flag dari client tidak bisa dipercaya penuh,
+  // tapi ini menutup kasus umum Fake GPS sebelum verifikasi perangkat (P14).
+  if (location.mocked) {
+    throw new HttpError(422, 'Lokasi palsu (mock GPS) terdeteksi. Matikan aplikasi Fake GPS.', {
+      code: 'MOCK_LOCATION',
+    });
+  }
+
+  // Lokasi wajib. Tidak ada lagi jalan pintas "absen tanpa lokasi".
   if (!location.hasLocation) {
     throw new HttpError(422, 'Lokasi GPS wajib aktif untuk absensi.', {
       code: 'LOCATION_REQUIRED',
@@ -74,7 +90,7 @@ function assertLocationAllowed(location) {
   if (location.accuracy === null || location.accuracy > config.maxAccuracyM) {
     throw new HttpError(
       422,
-      `Akurasi GPS tidak valid${location.accuracy === null ? '' : ` (±${location.accuracy} m)`}. Tunggu sinyal membaik lalu coba lagi.`,
+      `Akurasi GPS ${location.accuracy === null ? 'tidak terbaca' : `±${location.accuracy} m`}. Tunggu sampai akurasi ≤ ${config.maxAccuracyM} m lalu coba lagi.`,
       { code: 'LOCATION_ACCURACY', accuracy: location.accuracy, maxAccuracyM: config.maxAccuracyM }
     );
   }
@@ -84,12 +100,13 @@ function assertLocationAllowed(location) {
   if (!location.inside) {
     throw new HttpError(
       422,
-      `Anda berada ${location.distanceM} m dari ${config.office.name}. Radius absensi ${config.office.radiusM} m.`,
+      `Anda berada ${location.distanceM} m dari ${location.locationName}. Radius absensi ${location.radiusM} m.`,
       {
         code: 'OUTSIDE_GEOFENCE',
         distanceM: location.distanceM,
-        radiusM: config.office.radiusM,
+        radiusM: location.radiusM,
         toleranceM: location.toleranceM,
+        location: location.locationName,
         office: config.office,
       }
     );
@@ -164,25 +181,55 @@ function locationFields(location, prefix) {
   };
 }
 
+function locationResponse(location) {
+  return {
+    distanceM: location.distanceM,
+    inside: location.inside,
+    address: location.address,
+    accuracy: location.accuracy,
+    toleranceM: location.toleranceM,
+    location: location.locationName,
+    radiusM: location.radiusM,
+  };
+}
+
+function photoWatermark(req, location, serverTime) {
+  return {
+    nip: req.user.employee?.nip || req.user.email || '-',
+    nama: req.user.employee?.nama || req.user.profile?.nama || 'Karyawan',
+    serverTime,
+    locationName: location.locationName,
+    distanceM: location.distanceM,
+  };
+}
+
 router.get('/today', async (req, res) => {
   const id = employeeId(req);
-  const date = dateKey();
+  const now = await serverNow();
+  const date = dateKey(now);
   const record = await findToday(id, date);
   const photoMap = await attendancePhotoMap(id);
+  const work = await loadWorkSettings();
+  const lat = parseCoord(req.query.lat);
+  const lng = parseCoord(req.query.lng);
+  const nearest = lat !== null && lng !== null ? await nearestPoint(lat, lng) : null;
 
   res.json({
     date,
-    hari: hariName(),
-    server_time: new Date().toISOString(),
-    time: timeKey(),
+    hari: hariName(now),
+    server_time: now.toISOString(),
+    time: timeKey(now),
     office: config.office,
+    work,
+    nearest,
     record: attachPhotos(decorateRecord(record), photoMap),
   });
 });
 
 router.get('/', async (req, res) => {
   const id = employeeId(req);
-  const nowMonth = dateKey().slice(0, 7);
+  const now = await serverNow();
+  const nowMonth = dateKey(now).slice(0, 7);
   const { start, end } = monthRange(req.query.month || nowMonth);
 
   const { data, error } = await db
@@ -216,7 +263,10 @@ router.post('/check-in', async (req, res) => {
   const location = await evaluateLocation(req.body || {});
   assertLocationAllowed(location);
 
-  const date = dateKey();
+  // P4: tanggal & jam dari RPC get_server_now(), bukan jam perangkat.
+  const now = await serverNow();
+  const date = dateKey(now);
+  const work = await loadWorkSettings();
   const existing = await findToday(id, date);
   if (existing?.check_in_at) {
     throw conflict('Anda sudah absen masuk hari ini.');
@@ -229,11 +279,18 @@ router.post('/check-in', async (req, res) => {
   const payload = {
     employee_id: id,
     tanggal: date,
-    hari: hariName(),
-    check_in_at: new Date().toISOString(),
+    hari: hariName(now),
+    check_in_at: now.toISOString(),
+    status: attendanceStatus(now, work),
+    type: 'masuk',
+    timestamp_server: now.toISOString(),
     ...locationFields(location, 'check_in'),
+    lat: location.lat,
+    lng: location.lng,
+    titik_id: location.locationId,
     lokasi_tidak_tersedia: false,
     face_match: verification.distance,
+    face_match_score: verification.distance,
     face_verified: true,
     liveness_passed: true,
     face_verification_id: verification.id,
@@ -254,6 +311,7 @@ router.post('/check-in', async (req, res) => {
       date,
       type: 'in',
       photo,
+      watermark: photoWatermark(req, location, now.toISOString()),
     });
     photoUrl = uploaded.url;
     photoError = uploaded.error;
@@ -275,13 +333,7 @@ router.post('/check-in', async (req, res) => {
     },
     photo: photoUrl,
     photo_error: photoError,
-    location: {
-      distanceM: location.distanceM,
-      inside: location.inside,
-      address: location.address,
-      accuracy: location.accuracy,
-      toleranceM: location.toleranceM,
-    },
+    location: locationResponse(location),
   });
 });
 
@@ -291,7 +343,8 @@ router.post('/check-out', async (req, res) => {
   const location = await evaluateLocation(req.body || {});
   assertLocationAllowed(location);
 
-  const date = dateKey();
+  const nowDate = await serverNow();
+  const date = dateKey(nowDate);
   const existing = (await findToday(id, date)) || (await findOpenShift(id));
 
   if (!existing?.check_in_at) {
@@ -304,14 +357,20 @@ router.post('/check-out', async (req, res) => {
   const photo = requirePhotoPayload(req);
   const verification = await consumeVerification(req, id);
 
-  const now = new Date().toISOString();
+  const now = nowDate.toISOString();
   const minutes = minutesBetween(existing.check_in_at, now);
   const update = {
     check_out_at: now,
+    type: 'pulang',
+    timestamp_server: now,
     ...locationFields(location, 'check_out'),
+    lat: location.lat,
+    lng: location.lng,
+    titik_id: location.locationId,
     work_duration: formatDuration(minutes),
     lokasi_tidak_tersedia: false,
     face_match: verification.distance,
+    face_match_score: verification.distance,
     face_verified: true,
     liveness_passed: true,
     face_verification_id: verification.id,
@@ -335,6 +394,7 @@ router.post('/check-out', async (req, res) => {
       date: existing.tanggal,
       type: 'out',
       photo,
+      watermark: photoWatermark(req, location, now),
     });
     photoUrl = uploaded.url;
     photoError = uploaded.error;
@@ -354,13 +414,7 @@ router.post('/check-out', async (req, res) => {
     record: attachPhotos(decorateRecord(data), photoMap),
     photo: photoUrl,
     photo_error: photoError,
-    location: {
-      distanceM: location.distanceM,
-      inside: location.inside,
-      address: location.address,
-      accuracy: location.accuracy,
-      toleranceM: location.toleranceM,
-    },
+    location: locationResponse(location),
   });
 });
 

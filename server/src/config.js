@@ -41,7 +41,11 @@ const config = {
   enforceGeofence: bool(process.env.ENFORCE_GEOFENCE, true),
   requirePhoto: bool(process.env.REQUIRE_PHOTO, false),
   maxPhotoMb: num(process.env.MAX_PHOTO_MB, 3),
-  maxAccuracyM: num(process.env.MAX_ACCURACY_M, 100),
+  // Body JSON untuk endpoint yang membawa foto (absensi/patroli/izin).
+  // Base64 ~33% lebih besar dari file asli, jadi beri ruang di atas MAX_PHOTO_MB.
+  photoBodyLimit: process.env.PHOTO_BODY_LIMIT || '8mb',
+  // P4: akurasi GPS lebih buruk dari 50 m -> minta pengguna menunggu.
+  maxAccuracyM: num(process.env.MAX_ACCURACY_M, 50),
   geofenceAccuracyMarginM: num(process.env.GEOFENCE_ACCURACY_MARGIN_M, 25),
   workStart: process.env.WORK_START || '08:00',
   workEnd: process.env.WORK_END || '17:00',
