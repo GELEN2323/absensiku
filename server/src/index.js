@@ -5,6 +5,19 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const config = require('./config');
+
+// Berhenti sekarang kalau kredensial Supabase belum diisi/placeholder. Tanpa ini,
+// server tetap jalan dan request pertama gagal dengan error DNS (ENOTFOUND).
+const missing = config.validate();
+if (missing.length > 0) {
+  console.error(
+    `[config] Kredensial Supabase belum diisi: ${missing.join(', ')}.\n` +
+      '[config] Isi nilai asli dari dashboard Supabase (Project Settings > API) di server/.env. ' +
+      'Contoh format: server/.env.example.'
+  );
+  process.exit(1);
+}
+
 const { db } = require('./supabase');
 
 const authRoutes = require('./routes/auth');
@@ -105,11 +118,6 @@ app.use((err, _req, res, _next) => {
     },
   });
 });
-
-const missing = config.validate();
-if (missing.length > 0) {
-  console.warn(`[config] Environment belum lengkap: ${missing.join(', ')}`);
-}
 
 const server = app.listen(config.port, '0.0.0.0', () => {
   console.log(`[api] listening on http://localhost:${config.port}`);

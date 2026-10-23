@@ -68,11 +68,21 @@ const config = {
   webDist: path.resolve(__dirname, '../../dist'),
 };
 
+// Nilai contoh dari .env.example dianggap belum diisi. Kunci asli berupa JWT,
+// jadi tidak akan pernah cocok dengan pola ini.
+function isPlaceholder(value) {
+  return /placeholder|your-project|your-anon|your-service/i.test(value);
+}
+
+function isUnset(value) {
+  return !value || isPlaceholder(value);
+}
+
 config.validate = function validate() {
   const missing = [];
-  if (!config.supabaseUrl) missing.push('SUPABASE_URL');
-  if (!config.supabaseServiceRoleKey) missing.push('SUPABASE_SERVICE_ROLE_KEY');
-  if (!config.supabaseAnonKey) missing.push('SUPABASE_ANON_KEY');
+  if (isUnset(config.supabaseUrl)) missing.push('SUPABASE_URL');
+  if (isUnset(config.supabaseServiceRoleKey)) missing.push('SUPABASE_SERVICE_ROLE_KEY');
+  if (isUnset(config.supabaseAnonKey)) missing.push('SUPABASE_ANON_KEY');
   return missing;
 };
 
