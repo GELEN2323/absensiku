@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Platform, StyleSheet, Text, View } from 'react-native';
 import Constants from 'expo-constants';
 import { LogOut, ShieldCheck, UserRound } from 'lucide-react-native';
 import {
@@ -81,8 +81,16 @@ export default function ProfilScreen() {
 
   const employee = user?.employee || null;
   const displayName = employee?.nama || user?.nama || 'Pengguna';
-  const roleLabel = user?.role === 'admin' ? 'Admin' : 'Karyawan';
+  const jabatan = employee?.jabatan || (user?.role === 'admin' ? 'Chief' : 'Anggota');
   const appVersion = Constants.expoConfig?.version || '1.0.0';
+
+  const deviceName = Constants.deviceName || 'Perangkat tidak dikenal';
+  const osLabel =
+    Platform.OS === 'android'
+      ? `Android ${Platform.Version}`
+      : Platform.OS === 'ios'
+        ? `iOS ${Platform.Version}`
+        : 'Web';
 
   return (
     <Screen>
@@ -97,7 +105,7 @@ export default function ProfilScreen() {
           <Avatar uri={employee?.photo_url} name={displayName} size={72} />
           <View style={styles.profileText}>
             <Text style={styles.name}>{displayName}</Text>
-            <Text style={styles.role}>{roleLabel}</Text>
+            <Text style={styles.role}>{jabatan}</Text>
             <View style={styles.profileBadges}>
               <Badge label={employee?.nip ? `NIP ${employee.nip}` : 'NIP belum tersedia'} tone="brand" />
               {employee?.departemen ? <Badge label={employee.departemen} tone="info" /> : null}
@@ -109,10 +117,20 @@ export default function ProfilScreen() {
       <Card>
         <SectionTitle title="Data akun" hint="Hubungi admin jika ada data yang tidak sesuai." />
         <View style={styles.infoList}>
-          <InfoLine label="Email" value={user?.email || '—'} />
-          <InfoLine label="Nama karyawan" value={employee?.nama || '—'} />
-          <InfoLine label="NIP" value={employee?.nip || '—'} />
-          <InfoLine label="Departemen" value={employee?.departemen || '—'} last />
+          <InfoLine label="NIK / NIP" value={employee?.nip || '—'} />
+          <InfoLine label="Nama" value={employee?.nama || '—'} />
+          <InfoLine label="Jabatan" value={jabatan} />
+          <InfoLine label="Departemen" value={employee?.departemen || '—'} />
+          <InfoLine label="Email" value={user?.email || '—'} last />
+        </View>
+      </Card>
+
+      <Card>
+        <SectionTitle title="Perangkat" hint="Dipakai untuk mengikat sesi login." />
+        <View style={styles.infoList}>
+          <InfoLine label="Perangkat" value={deviceName} />
+          <InfoLine label="Sistem" value={osLabel} />
+          <InfoLine label="Versi app" value={`v${appVersion}`} last />
         </View>
       </Card>
 

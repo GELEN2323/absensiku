@@ -17,8 +17,13 @@ export default function IndexScreen() {
     );
   }
 
-  if (!token) return <Redirect href="/login" />;
-  return <Redirect href={user?.role === 'admin' ? '/admin' : '/user'} />;
+  if (!token || !user) return <Redirect href="/login" />;
+
+  // Chief hanya boleh memakai App Admin. Layout /user menampilkan pesan
+  // penolakan + tombol logout kalau sesi Chief terlanjur tersimpan.
+  if (user.employee?.jabatan === 'Chief') return <Redirect href="/user" />;
+
+  return <Redirect href={user.role === 'admin' ? '/admin' : '/user'} />;
 }
 
 const styles = StyleSheet.create({

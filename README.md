@@ -1,21 +1,26 @@
-# Absensi Karyawan — Web App + API + WebView Shell
+# Absensi Karyawan — App Pengguna (native) + Web App + API
 
 Aplikasi absensi (masuk/pulang) berbasis lokasi kantor. Satu basis kode berisi:
 
-1. **Web app** (Expo Router / React Native Web) — login, absensi, riwayat, profil, dan panel admin.
-2. **Backend API** (`server/`, Express + Supabase service role) — satu-satunya pintu ke database, validasi geofence & jam memakai waktu server.
-3. **Aplikasi Android/iOS** — shell WebView yang membuka web app hasil deploy.
+1. **App Pengguna** (Expo Router native, `com.absensi.user`) — login NIK, absensi, riwayat,
+   patroli, profil untuk jabatan **Danru/Anggota**.
+2. **Web app** (React Native Web) — versi browser dari layar yang sama, plus panel admin lama.
+3. **Backend API** (`server/`, Express + Supabase service role) — satu-satunya pintu ke database, validasi geofence & jam memakai waktu server.
+
+App Admin (Chief) dibangun terpisah pada tahap P8 dengan package `com.absensi.admin`.
 
 ## Struktur
 
 ```
 src/
-  app/            # route web (expo-router)
+  app/            # route expo-router (native + web)
     login.tsx
-    register.tsx  # pendaftaran akun karyawan
-    user/         # index (absensi), riwayat, profil
-    admin/        # index (ringkasan), absensi, karyawan
-  components/     # UI kit + WebViewShell (native) / fallback
+    lupa-sandi.tsx # kirim link reset password lewat NIK
+    register.tsx   # pendaftaran akun (dipakai web/API)
+    user/          # tab: index (absen), riwayat, patroli, profil
+                    # _layout.tsx juga menolak akun Chief
+    admin/         # panel admin web (dipindah ke App Admin pada P8)
+  components/     # UI kit (Screen, Card, Button, TextField, ...)
   lib/            # api client, format, geo, types
   store/auth.ts   # sesi (token + user) via Zustand + AsyncStorage
 server/
@@ -55,8 +60,9 @@ npm run api:dev     # API di :4000
 npm run web         # Expo dev server di :8081
 ```
 
-Untuk aplikasi Android/iOS, isi `EXPO_PUBLIC_WEBVIEW_URL` di `.env` dengan URL web
-hasil deploy (mis. `https://absensi.example.com`), lalu `npm run android`.
+Untuk aplikasi Android/iOS, jalankan `npm run android` (development build). App Pengguna
+memakai layar native, bukan WebView; `EXPO_PUBLIC_API_URL` harus menunjuk ke API yang
+bisa diakses perangkat (mis. `http://192.168.1.10:4000`, bukan `localhost`).
 
 ## Backend P1 — satu Supabase untuk dua aplikasi
 
@@ -92,14 +98,33 @@ Foto lama tetap di bucket `employee-photos` (dipakai web app).
 
 Akun seed (`supabase/seed.sql`), password semuanya `Absensi123!` — ganti sebelum dipakai:
 
-| NIK | Nama | Jabatan | Login |
+| NIK | Nama | Jabatan | Email auth |
 |---|---|---|---|
 | `CHIEF001` | Budi Santoso | Chief | `chief001@absensi.local` |
 | `DANRU001` | Andi Pratama | Danru | `danru001@absensi.local` |
 | `ANGGOTA001` | Citra Lestari | Anggota | `anggota001@absensi.local` |
 
+Login App Pengguna memakai **NIK** (`DANRU001` / `ANGGOTA001`), bukan email. Email hanya
+identitas internal Supabase Auth.
+
 Catatan wajah: P1 tidak menambah kolom embedding kedua. Sumber kebenaran tetap
 `employee_faces.embedding` (pipeline aktif 128-d); perubahan ke 512-d dibahas di P3.
+
+## App Pengguna (P2)
+
+- **Login**: NIK + password. Server memetakan NIK ke email auth (`<nik>@absensi.local`),
+  jadi karyawan tidak perlu tahu/mengetik email.
+- **Pembatasan jabatan**: hanya `Danru` dan `Anggota` yang bisa masuk. Akun `Chief`
+  langsung ditolak di layar login dan, kalau sesinya tersimpan, di layout tab:
+  "Gunakan aplikasi admin".
+- **Tab**: Absensi, Riwayat, Patroli, Profil. Tab Patroli masih kerangka; peta, geofence,
+  dan selfie verifikasi diisi di P6.
+- **Lupa password**: `POST /api/auth/forgot-password` mencari email dari NIK lalu meminta
+  Supabase mengirim link reset (butuh SMTP aktif di dashboard Supabase dan
+  `PASSWORD_RESET_REDIRECT_URL` bila memakai deep link). Respons selalu generik supaya NIP
+  tidak bisa ditebak.
+- **Profil**: NIK/NIP, nama, jabatan, foto, info perangkat (nama, OS, versi app), ganti
+  password, dan logout.
 
 ## Konfigurasi server (`server/.env`)
 
@@ -126,7 +151,8 @@ Catatan wajah: P1 tidak menambah kolom embedding kedua. Sumber kebenaran tetap
 | GET | `/api/health` | publik |
 | GET | `/api/office` | publik |
 | POST | `/api/auth/register` | publik (nama, NIP, email, password) |
-| POST | `/api/auth/login` | publik (identifier: email atau NIP) |
+| POST | `/api/auth/login` | publik (identifier: NIK atau email) |
+| POST | `/api/auth/forgot-password` | publik (NIK, kirim link reset ke email) |
 | POST | `/api/auth/refresh` | publik (refresh token) |
 | GET | `/api/auth/me` | login |
 | POST | `/api/auth/password` | login |
@@ -159,7 +185,7 @@ Geofence dihitung di server dari `OFFICE_*`, jadi koordinat dari client hanya us
 | `npm run qa:api` | Smoke test API end-to-end termasuk foto & geofence (akun sementara, dihapus otomatis) |
 | `node scripts/qa-attendance.mjs` | QA browser: izin GPS, jarak kantor, buka kamera, absen |
 | `node scripts/qa-register.mjs` | QA browser: isi form pendaftaran sampai masuk dashboard |
-| `npm run android` / `npm run ios` | Build aplikasi native (WebView shell) |
+| `npm run android` / `npm run ios` | Build aplikasi native App Pengguna |
 
 ## Kamera & lokasi
 
@@ -172,9 +198,8 @@ Geofence dihitung di server dari `OFFICE_*`, jadi koordinat dari client hanya us
   bucket Supabase Storage `employee-photos` pada
   `attendance/<employee_id>/<tanggal>-in|out.jpg` (menimpa foto lama untuk hari yang sama).
   URL foto ikut di respons absensi, `/api/attendance/today`, riwayat, dan detail karyawan admin.
-- Di Android/iOS, foto tetap berjalan di dalam WebView selama `EXPO_PUBLIC_WEBVIEW_URL`
-  memakai **HTTPS** (browser memblokir kamera & GPS pada http biasa). WebView shell sudah
-  mengizinkan permintaan kamera/lokasi native.
+- Di Android/iOS, kamera & GPS memakai modul native (`expo-camera`, `expo-location`).
+  Di web, keduanya hanya berjalan pada HTTPS/localhost.
 - Kalau kamera tidak tersedia atau izin ditolak, aplikasi menawarkan "Lanjut tanpa foto"
   agar absensi tidak macet (set `REQUIRE_PHOTO=1` untuk mewajibkannya di server).
 
@@ -183,8 +208,8 @@ Geofence dihitung di server dari `OFFICE_*`, jadi koordinat dari client hanya us
 1. `npm run build:web` → folder `dist/`.
 2. Jalankan `server/` sebagai service (Railway/Fly/VPS), set env produksi, dan arahkan
    static web ke `dist/` (sudah otomatis karena server menyajikan `dist/`).
-3. Isi `EXPO_PUBLIC_WEBVIEW_URL` dengan URL publik tersebut, lalu build aplikasi
-   Android/iOS.
+3. Build App Pengguna dengan EAS (`expo prebuild` + development client) setelah
+   `EXPO_PUBLIC_API_URL` menunjuk ke API produksi.
 
 Build web sengaja mengosongkan `EXPO_PUBLIC_API_URL` supaya browser memanggil API
 di origin yang sama, bukan `localhost` milik pengguna.

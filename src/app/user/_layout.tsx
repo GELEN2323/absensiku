@@ -1,6 +1,6 @@
 import { Redirect, Tabs } from 'expo-router';
-import { Clock, History, UserRound } from 'lucide-react-native';
-import { LoadingView } from '@/components/ui';
+import { Clock, History, MapPin, UserRound } from 'lucide-react-native';
+import { Button, LoadingView, Notice, PageHeader, Screen } from '@/components/ui';
 import { useAuth } from '@/store/auth';
 import { colors } from '@/theme';
 
@@ -8,10 +8,32 @@ export default function UserLayout() {
   const hydrated = useAuth((state) => state.hydrated);
   const token = useAuth((state) => state.token);
   const user = useAuth((state) => state.user);
+  const signOut = useAuth((state) => state.signOut);
 
   if (!hydrated) return <LoadingView label="Menyiapkan sesi..." />;
   if (!token) return <Redirect href="/login" />;
-  if (user?.role === 'admin') return <Redirect href="/admin" />;
+
+  // Pembatasan jabatan: App Pengguna hanya untuk Danru/Anggota.
+  if (user?.employee?.jabatan === 'Chief') {
+    return (
+      <Screen>
+        <PageHeader
+          eyebrow="AKSES DIBATASI"
+          title="Gunakan aplikasi admin"
+          subtitle="Akun Chief tidak bisa memakai App Pengguna."
+        />
+        <Notice
+          tone="warning"
+          title="Salah aplikasi"
+          message="Dashboard, kelola pengguna, lokasi, dan approval izin ada di App Admin (com.absensi.admin)."
+        />
+        <Button label="Logout" variant="secondary" onPress={signOut} fullWidth />
+      </Screen>
+    );
+  }
+
+  // Akun lama dengan role admin tetapi tanpa jabatan tetap memakai panel admin web.
+  if (user?.role === 'admin' && !user.employee?.jabatan) return <Redirect href="/admin" />;
 
   return (
     <Tabs
@@ -47,6 +69,13 @@ export default function UserLayout() {
         options={{
           title: 'Riwayat',
           tabBarIcon: ({ color, size }) => <History color={color} size={size} />,
+        }}
+      />
+      <Tabs.Screen
+        name="patroli"
+        options={{
+          title: 'Patroli',
+          tabBarIcon: ({ color, size }) => <MapPin color={color} size={size} />,
         }}
       />
       <Tabs.Screen

@@ -1,5 +1,7 @@
 export type Role = 'admin' | 'karyawan';
 
+export type Jabatan = 'Chief' | 'Danru' | 'Anggota';
+
 export type Employee = {
   id: string;
   nip: string;
@@ -8,6 +10,7 @@ export type Employee = {
   email: string | null;
   photo_url: string | null;
   face_registered: boolean;
+  jabatan: Jabatan;
 };
 
 export type User = {
@@ -89,6 +92,11 @@ export type LoginResponse = {
   refreshToken: string;
   expiresAt: number;
   user: User;
+};
+
+export type ForgotPasswordResponse = {
+  ok: boolean;
+  message: string;
 };
 
 export type RegisterInput = {

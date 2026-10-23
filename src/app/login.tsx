@@ -16,8 +16,8 @@ import {
   Clock,
   Eye,
   EyeOff,
+  Hash,
   Lock,
-  Mail,
   MapPin,
   ShieldCheck,
 } from 'lucide-react-native';
@@ -53,6 +53,7 @@ export default function LoginScreen() {
   const token = useAuth((state) => state.token);
   const user = useAuth((state) => state.user);
   const signIn = useAuth((state) => state.signIn);
+  const signOut = useAuth((state) => state.signOut);
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
@@ -62,13 +63,14 @@ export default function LoginScreen() {
 
   if (!hydrated) return <LoadingView label="Menyiapkan aplikasi..." />;
   if (token && user) {
-    return <Redirect href={user.role === 'admin' ? '/admin' : '/user'} />;
+    // Sesi Chief tetap diarahkan ke /user yang menampilkan penolakan + logout.
+    return <Redirect href={user.role === 'admin' && user.employee?.jabatan !== 'Chief' ? '/admin' : '/user'} />;
   }
 
   const handleSubmit = async () => {
     if (loading) return;
     if (!identifier.trim() || !password) {
-      setError('Isi email/NIP dan password terlebih dahulu.');
+      setError('Isi NIK dan password terlebih dahulu.');
       return;
     }
 
@@ -76,7 +78,15 @@ export default function LoginScreen() {
     setError(null);
     try {
       const loggedIn = await signIn(identifier, password);
-      router.replace(loggedIn.role === 'admin' ? '/admin' : '/user');
+
+      // App Pengguna hanya untuk Danru/Anggota. Chief memakai App Admin.
+      if (loggedIn.employee?.jabatan === 'Chief') {
+        await signOut();
+        setError('Akun Chief hanya bisa masuk lewat App Admin. Silakan gunakan aplikasi admin.');
+        return;
+      }
+
+      router.replace('/user');
     } catch (caught) {
       setError(
         caught instanceof ApiError
@@ -132,7 +142,7 @@ export default function LoginScreen() {
                 <Text style={styles.formEyebrow}>MASUK APLIKASI</Text>
                 <Text style={styles.formTitle}>Selamat datang kembali</Text>
                 <Text style={styles.formSubtitle}>
-                  Gunakan email terdaftar atau NIP karyawan.
+                  Masuk dengan NIK dan password yang diberikan admin.
                 </Text>
               </View>
 
@@ -143,16 +153,15 @@ export default function LoginScreen() {
                 style={styles.form}
               >
                 <TextField
-                  label="Email atau NIP"
+                  label="NIK"
                   value={identifier}
                   onChangeText={setIdentifier}
-                  placeholder="nama@perusahaan.com atau NIP"
-                  autoCapitalize="none"
+                  placeholder="Contoh: ANGGOTA001"
+                  autoCapitalize="characters"
                   autoCorrect={false}
-                  keyboardType="email-address"
                   textContentType="username"
                   returnKeyType="next"
-                  right={<Mail size={18} color={colors.faint} />}
+                  right={<Hash size={18} color={colors.faint} />}
                 />
 
                 <View>
@@ -182,8 +191,15 @@ export default function LoginScreen() {
                   />
                   <View style={styles.passwordHint}>
                     <Lock size={12} color={colors.faint} />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Lupa password"
+                      onPress={() => router.push('/lupa-sandi')}
+                    >
+                      <Text style={styles.passwordHintLink}>Lupa password?</Text>
+                    </Pressable>
                     <Text style={styles.passwordHintText}>
-                      Password dikelola oleh admin. Hubungi admin jika lupa.
+                      Link reset dikirim ke email terdaftar.
                     </Text>
                   </View>
                 </View>
@@ -198,15 +214,9 @@ export default function LoginScreen() {
               </KeyboardAvoidingView>
 
               <View style={styles.registerRow}>
-                <Text style={styles.registerText}>Belum punya akun?</Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Daftar akun karyawan"
-                  onPress={() => router.push('/register')}
-                  style={styles.registerLink}
-                >
-                  <Text style={styles.registerLinkText}>Daftar sekarang</Text>
-                </Pressable>
+                <Text style={styles.registerText}>
+                  Akun dibuat oleh admin. Hubungi admin jika belum punya akses.
+                </Text>
               </View>
 
               <Text style={styles.helper}>
@@ -345,6 +355,11 @@ const styles = StyleSheet.create({
     fontSize: font.tiny,
     flex: 1,
   },
+  passwordHintLink: {
+    color: colors.brand,
+    fontSize: font.tiny,
+    fontWeight: '700',
+  },
   registerRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -355,14 +370,6 @@ const styles = StyleSheet.create({
   registerText: {
     color: colors.muted,
     fontSize: font.small,
-  },
-  registerLink: {
-    paddingVertical: 4,
-  },
-  registerLinkText: {
-    color: colors.brand,
-    fontSize: font.small,
-    fontWeight: '700',
   },
   helper: {
     color: colors.faint,

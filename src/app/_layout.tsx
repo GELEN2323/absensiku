@@ -3,22 +3,19 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import WebViewShell from '@/components/WebViewShell';
 import { AuthBootstrap } from '@/components/AuthBootstrap';
 import { colors } from '@/theme';
 
-const isNative = require('react-native').Platform.OS !== 'web';
-
+/**
+ * App Pengguna (Anggota/Danru): seluruh layar native, bukan WebView.
+ * AuthBootstrap memulihkan sesi tersimpan sebelum route pertama dirender.
+ */
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
         <View style={styles.root}>
           <StatusBar style="dark" />
-          {/*
-            Stack tetap dipasang supaya expo-router punya navigator di semua platform.
-            Di Android/iOS, WebView shell menutupi seluruh layar di atas Stack.
-          */}
           <Stack
             screenOptions={{
               headerShown: false,
@@ -26,13 +23,7 @@ export default function RootLayout() {
               animation: 'fade',
             }}
           />
-          {isNative ? (
-            <View style={StyleSheet.absoluteFill}>
-              <WebViewShell />
-            </View>
-          ) : (
-            <AuthBootstrap />
-          )}
+          <AuthBootstrap />
         </View>
       </SafeAreaProvider>
     </GestureHandlerRootView>

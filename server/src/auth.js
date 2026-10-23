@@ -28,9 +28,11 @@ async function loadUserContext(userId) {
 
   let employee = null;
   if (profile?.employee_id) {
+    // select('*') supaya login tetap jalan di database yang belum menjalankan
+    // migrasi P1 (kolom jabatan). Nilai yang tidak ada di-default di serializeUser.
     const { data, error } = await db
       .from('employees')
-      .select('id, nip, nama, departemen, email, photo_url, face_registered')
+      .select('*')
       .eq('id', profile.employee_id)
       .maybeSingle();
     if (error) throw error;
@@ -58,6 +60,7 @@ function serializeUser(context) {
           email: employee.email,
           photo_url: employee.photo_url,
           face_registered: Boolean(employee.face_registered),
+          jabatan: employee.jabatan || 'Anggota',
         }
       : null,
   };
@@ -201,6 +204,39 @@ async function register(input = {}) {
   return { user: serializeUser(context) };
 }
 
+/**
+ * Kirim link reset password ke email terdaftar untuk sebuah NIP.
+ * Respons selalu sama supaya NIP yang tidak terdaftar tidak bisa ditebak.
+ * Membutuhkan SMTP yang sudah dikonfigurasi di dashboard Supabase.
+ */
+async function requestPasswordReset(nip) {
+  const value = String(nip || '').trim();
+  if (!value) throw new HttpError(400, 'NIP wajib diisi.');
+  if (value.includes('@')) {
+    throw new HttpError(400, 'Masukkan NIP, bukan email.');
+  }
+
+  const { data, error } = await db
+    .from('employees')
+    .select('email')
+    .ilike('nip', value)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data?.email) return { ok: true };
+
+  const redirectTo = config.passwordResetRedirectUrl || undefined;
+  const { error: resetError } = await authClient.auth.resetPasswordForEmail(
+    String(data.email).toLowerCase(),
+    redirectTo ? { redirectTo } : undefined
+  );
+  if (resetError) {
+    console.warn('[auth] gagal mengirim reset password:', resetError.message);
+  }
+
+  return { ok: true };
+}
+
 async function refreshSession(refreshToken) {
   if (!refreshToken) throw new HttpError(400, 'Refresh token wajib diisi.');
   const { data, error } = await authClient.auth.refreshSession({ refresh_token: refreshToken });
@@ -269,6 +305,7 @@ async function changePassword(user, oldPassword, newPassword) {
 module.exports = {
   register,
   signIn,
+  requestPasswordReset,
   refreshSession,
   requireAuth,
   requireAdmin,

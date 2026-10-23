@@ -2,6 +2,7 @@ import type {
   AdminAttendanceResponse,
   AdminEmployeesResponse,
   AdminSummary,
+  ForgotPasswordResponse,
   HistoryResponse,
   LoginResponse,
   Position,
@@ -119,6 +120,12 @@ export const api = {
     }),
 
   me: (token: string) => request<{ user: User }>('/api/auth/me', { token }),
+
+  forgotPassword: (nik: string) =>
+    request<ForgotPasswordResponse>('/api/auth/forgot-password', {
+      method: 'POST',
+      body: { nik },
+    }),
 
   changePassword: (token: string, oldPassword: string, newPassword: string) =>
     request<{ ok: boolean; message: string }>('/api/auth/password', {

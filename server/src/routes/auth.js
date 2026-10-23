@@ -4,6 +4,7 @@ const express = require('express');
 const {
   register,
   signIn,
+  requestPasswordReset,
   refreshSession,
   requireAuth,
   serializeUser,
@@ -58,6 +59,17 @@ router.post('/register', async (req, res) => {
 
   const result = await register(req.body || {});
   res.status(201).json(result);
+});
+
+router.post('/forgot-password', async (req, res) => {
+  const key = `forgot:${req.ip}:${String(req.body?.nik || '').toLowerCase()}`;
+  rateLimit(key);
+
+  await requestPasswordReset(req.body?.nik);
+  res.json({
+    ok: true,
+    message: 'Jika NIP terdaftar, link reset password sudah dikirim ke email terdaftar.',
+  });
 });
 
 router.post('/refresh', async (req, res) => {

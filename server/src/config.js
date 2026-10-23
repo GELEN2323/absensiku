@@ -23,6 +23,8 @@ const config = {
   supabaseAnonKey: process.env.SUPABASE_ANON_KEY || '',
   supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
 
+  passwordResetRedirectUrl: process.env.PASSWORD_RESET_REDIRECT_URL || '',
+
   webOrigins: (process.env.WEB_ORIGINS || '')
     .split(',')
     .map((origin) => origin.trim())
