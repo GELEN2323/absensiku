@@ -24,6 +24,7 @@ const authRoutes = require('./routes/auth');
 const attendanceRoutes = require('./routes/attendance');
 const adminRoutes = require('./routes/admin');
 const faceRoutes = require('./routes/face');
+const patrolRoutes = require('./routes/patrol');
 const { loadFaceApi } = require('./lib/face');
 
 const app = express();
@@ -69,6 +70,7 @@ app.use('/api/face', express.json({ limit: config.faceBodyLimit }), faceRoutes);
 // dari parser global supaya base64 foto tidak ditolak 413.
 const photoJson = express.json({ limit: config.photoBodyLimit });
 app.use('/api/attendance', photoJson, attendanceRoutes);
+app.use('/api/patrol', photoJson, patrolRoutes);
 
 app.use(express.json({ limit: '1mb' }));
 
