@@ -43,6 +43,10 @@ function assertWebContext() {
   }
 }
 
+function isMockedCoords(coords: { mocked?: boolean } | null | undefined): boolean {
+  return coords?.mocked === true;
+}
+
 function mapWebError(error: GeolocationPositionError): LocationError {
   if (error.code === error.PERMISSION_DENIED) {
     return new LocationError(
@@ -81,6 +85,7 @@ function webPosition(): Promise<Position> {
           lng: result.coords.longitude,
           accuracy:
             typeof result.coords.accuracy === 'number' ? Math.round(result.coords.accuracy) : null,
+          mocked: false,
         });
       },
       (error) => {
@@ -130,6 +135,7 @@ async function nativePosition(): Promise<Position> {
       lng: result.coords.longitude,
       accuracy:
         typeof result.coords.accuracy === 'number' ? Math.round(result.coords.accuracy) : null,
+      mocked: isMockedCoords(result.coords as { mocked?: boolean }),
     };
   } catch (error) {
     if (error instanceof LocationError) throw error;
@@ -176,6 +182,7 @@ export function watchPosition(
                 typeof result.coords.accuracy === 'number'
                   ? Math.round(result.coords.accuracy)
                   : null,
+              mocked: isMockedCoords(result.coords as { mocked?: boolean }),
             });
           }
         );
@@ -210,6 +217,7 @@ export function watchPosition(
         lng: result.coords.longitude,
         accuracy:
           typeof result.coords.accuracy === 'number' ? Math.round(result.coords.accuracy) : null,
+        mocked: false,
       });
     },
     (error) => {
