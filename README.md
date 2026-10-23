@@ -35,7 +35,13 @@ npm --prefix server install
 #    server/.env  -> SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
 #    .env         -> EXPO_PUBLIC_API_URL=http://localhost:4000
 
-# 2. Build web lalu jalankan API + web dalam satu proses
+# 2. Jalankan migrasi di Supabase SQL Editor, urut nama file:
+#    supabase/migrations/20261023_base_schema.sql      -> employees, profiles, attendance, bucket foto
+#    supabase/migrations/20261023_face_recognition.sql -> tabel wajah, RPC, RLS
+#    supabase/migrations/20261024_p1_backend.sql       -> lokasi, patroli, izin, settings, RLS jabatan
+#    supabase/seed.sql                                 -> 3 akun demo + 1 kantor + 7 titik patroli
+
+# 3. Build web lalu jalankan API + web dalam satu proses
 npm run build:web
 npm run serve
 # Web  : http://localhost:4000
@@ -51,6 +57,49 @@ npm run web         # Expo dev server di :8081
 
 Untuk aplikasi Android/iOS, isi `EXPO_PUBLIC_WEBVIEW_URL` di `.env` dengan URL web
 hasil deploy (mis. `https://absensi.example.com`), lalu `npm run android`.
+
+## Backend P1 — satu Supabase untuk dua aplikasi
+
+P1 menambah fondasi untuk **App Pengguna** (Anggota/Danru) dan **App Admin** (Chief).
+Migrasi bersifat aditif: skema dan API lama tetap dipakai, tidak ada tabel yang di-drop.
+
+| Brief | Implementasi di repo |
+|---|---|
+| `users` | `employees` (nip, nama, jabatan, device_id, aktif) + `profiles` (auth, role) |
+| `locations` | tabel baru, titik absen dengan lat/lng + `radius_meter` |
+| `attendance` | tabel lama (1 baris/hari) + kolom event: `type`, `status`, `timestamp_server`, `lat`, `lng`, `titik_id`, `foto_url`, `face_match_score` |
+| `patrol_checkpoints`, `patrol_logs` | tabel baru; `patrol_logs` unik per user+titik+tanggal |
+| `izin` | tabel baru, status `pending/approved/rejected` + `reviewed_by` |
+| `settings` | `jam_masuk`, `jam_pulang`, `toleransi_menit` (seed otomatis) |
+
+RPC:
+
+- `get_server_now()` — satu-satunya sumber waktu untuk status absensi (anti fake timer).
+- `check_geofence(lat, lng, location_id?)` — jarak tiap titik absen + `inside`, dihitung
+  dengan PostGIS `ST_DWithin` (meter) di server, bukan di HP.
+
+RLS (role dari `employees.jabatan`, dibaca lewat `profiles.employee_id`):
+
+| Tabel | Anggota | Danru | Chief |
+|---|---|---|---|
+| `employees`, `attendance`, `patrol_logs`, `izin` | baris sendiri | semua tim | semua |
+| `locations`, `patrol_checkpoints`, `settings` | baca | baca | baca + tulis |
+| `izin` (update) | – | approve/reject | approve/reject |
+| `employee_faces`, `face_attempt_logs`, `face_verifications` | hanya service role | hanya service role | hanya service role |
+
+Storage: bucket privat `attendance`, `faces`, `izin` dengan path `<employee_id>/<file>`.
+Foto lama tetap di bucket `employee-photos` (dipakai web app).
+
+Akun seed (`supabase/seed.sql`), password semuanya `Absensi123!` — ganti sebelum dipakai:
+
+| NIK | Nama | Jabatan | Login |
+|---|---|---|---|
+| `CHIEF001` | Budi Santoso | Chief | `chief001@absensi.local` |
+| `DANRU001` | Andi Pratama | Danru | `danru001@absensi.local` |
+| `ANGGOTA001` | Citra Lestari | Anggota | `anggota001@absensi.local` |
+
+Catatan wajah: P1 tidak menambah kolom embedding kedua. Sumber kebenaran tetap
+`employee_faces.embedding` (pipeline aktif 128-d); perubahan ke 512-d dibahas di P3.
 
 ## Konfigurasi server (`server/.env`)
 
