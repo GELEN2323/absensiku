@@ -85,6 +85,11 @@ export default function UserLayout() {
           tabBarIcon: ({ color, size }) => <UserRound color={color} size={size} />,
         }}
       />
+      {/*
+        Halaman pendukung tetap berada di dalam grup tab supaya tombol
+        kembali konsisten, tetapi tidak tampil sebagai tab kelima.
+      */}
+      <Tabs.Screen name="wajah" options={{ href: null }} />
     </Tabs>
   );
 }

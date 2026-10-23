@@ -2,9 +2,18 @@ import type {
   AdminAttendanceResponse,
   AdminEmployeesResponse,
   AdminSummary,
+  FaceEnrollResponse,
+  FaceStatusResponse,
+  FaceVerifyResponse,
   ForgotPasswordResponse,
   HistoryResponse,
+  IzinCreateResponse,
+  IzinListResponse,
+  LivenessChallenge,
   LoginResponse,
+  PatrolHistoryResponse,
+  PatrolScanResponse,
+  PatrolTodayResponse,
   Position,
   RegisterInput,
   TodayResponse,
@@ -137,23 +146,113 @@ export const api = {
   logout: (token: string) =>
     request<{ ok: boolean }>('/api/auth/logout', { method: 'POST', token }),
 
-  today: (token: string) => request<TodayResponse>('/api/attendance/today', { token }),
+  today: (token: string, position?: Position | null) => {
+    const search = new URLSearchParams();
+    if (position) {
+      search.set('lat', String(position.lat));
+      search.set('lng', String(position.lng));
+    }
+    const query = search.toString();
+    return request<TodayResponse>(`/api/attendance/today${query ? `?${query}` : ''}`, { token });
+  },
 
   history: (token: string, month: string) =>
     request<HistoryResponse>(`/api/attendance?month=${encodeURIComponent(month)}`, { token }),
 
-  checkIn: (token: string, position: Position | null, photo?: string | null) =>
+  checkIn: (
+    token: string,
+    position: Position,
+    photo: string | null,
+    verificationId: string
+  ) =>
     request<{ message: string; record: unknown }>('/api/attendance/check-in', {
       method: 'POST',
       token,
-      body: { ...(position || {}), ...(photo ? { photo } : {}) },
+      timeoutMs: 60000,
+      body: { ...position, verification_id: verificationId, ...(photo ? { photo } : {}) },
     }),
 
-  checkOut: (token: string, position: Position | null, photo?: string | null) =>
+  checkOut: (
+    token: string,
+    position: Position,
+    photo: string | null,
+    verificationId: string
+  ) =>
     request<{ message: string; record: unknown }>('/api/attendance/check-out', {
       method: 'POST',
       token,
-      body: { ...(position || {}), ...(photo ? { photo } : {}) },
+      timeoutMs: 60000,
+      body: { ...position, verification_id: verificationId, ...(photo ? { photo } : {}) },
+    }),
+
+  /* ------------------------------ Wajah ------------------------------ */
+
+  faceStatus: (token: string) => request<FaceStatusResponse>('/api/face/status', { token }),
+
+  enrollFace: (token: string, photos: string[]) =>
+    request<FaceEnrollResponse>('/api/face/enroll', {
+      method: 'POST',
+      token,
+      timeoutMs: 90000,
+      body: { photos },
+    }),
+
+  verifyFace: (token: string, frames: string[], challenge: LivenessChallenge) =>
+    request<FaceVerifyResponse>('/api/face/verify', {
+      method: 'POST',
+      token,
+      timeoutMs: 90000,
+      body: { frames, challenge },
+    }),
+
+  /* ----------------------------- Patroli ----------------------------- */
+
+  patrolToday: (token: string) => request<PatrolTodayResponse>('/api/patrol/today', { token }),
+
+  patrolScan: (
+    token: string,
+    input: {
+      checkpointId: string;
+      position: Position;
+      photo: string;
+    }
+  ) =>
+    request<PatrolScanResponse>('/api/patrol/scan', {
+      method: 'POST',
+      token,
+      timeoutMs: 60000,
+      body: {
+        checkpoint_id: input.checkpointId,
+        ...input.position,
+        photo: input.photo,
+      },
+    }),
+
+  patrolHistory: (token: string) =>
+    request<PatrolHistoryResponse>('/api/patrol/history', { token }),
+
+  /* ------------------------------- Izin ------------------------------ */
+
+  izinList: (token: string, month?: string) => {
+    const search = new URLSearchParams();
+    if (month) search.set('month', month);
+    const query = search.toString();
+    return request<IzinListResponse>(`/api/izin${query ? `?${query}` : ''}`, { token });
+  },
+
+  createIzin: (
+    token: string,
+    input: { tanggal: string; alasan: string; photo?: string | null }
+  ) =>
+    request<IzinCreateResponse>('/api/izin', {
+      method: 'POST',
+      token,
+      timeoutMs: 60000,
+      body: {
+        tanggal: input.tanggal,
+        alasan: input.alasan,
+        ...(input.photo ? { photo: input.photo } : {}),
+      },
     }),
 
   adminSummary: (token: string, date?: string) =>
